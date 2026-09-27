@@ -1,0 +1,20 @@
+{
+  "name": "med-workforce-app",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "packages/*",
+    "services/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:api": "npm run dev --workspace services/api",
+    "dev:doctor-web": "npm run dev --workspace apps/doctor-web",
+    "dev:hospital-web": "npm run dev --workspace apps/hospital-web",
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "prisma:generate": "npm run prisma:generate --workspace services/api",
+    "prisma:migrate": "npm run prisma:migrate --workspace services/api"
+  }
+}

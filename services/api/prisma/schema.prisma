@@ -1,0 +1,1089 @@
+// Medical Workforce Passport & Exchange — canonical data model
+//
+// Source: docs/spec/01-technical-architecture-data-model-v0.2.docx,
+// docs/spec/02-ynlhn-mvp-product-spec-v1.0.docx, and
+// docs/addendum/v0.3-addendum.md.
+//
+// Design invariant (do not violate when extending this schema):
+// Credential, CredentialEvidence, Verification and ScopeGrant are always
+// separate entities. ScopeGrant is always organisation-issued and never
+// practitioner-editable. Eligibility results always support an
+// INDETERMINATE outcome — never default missing data to ELIGIBLE.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Identity & organisation
+// ---------------------------------------------------------------------------
+
+model Practitioner {
+  id          String             @id @default(uuid())
+  status      PractitionerStatus @default(ACTIVE)
+  displayName String
+  legalName   String?
+  email       String             @unique
+  mobile      String?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  identifiers            PractitionerIdentifier[]
+  credentials            PractitionerCredential[]
+  proceduralEndorsements ProceduralEndorsement[]
+  scopeGrants            ScopeGrant[]
+  areaOfNeed             AreaOfNeedDetermination[]
+  moratoriumStatuses     MoratoriumStatus[]
+  preferences            PractitionerPreference[]
+  availability           Availability[]
+  candidates             Candidate[]
+  bookings               Booking[]
+  placements             Placement[]
+  experienceResponses    ExperienceResponse[]
+  credentialShares       CredentialShare[]
+  workEpisodes           WorkEpisode[]
+  fatigueAssessments     FatigueAssessment[]
+  fatigueDeclarations    FatigueDeclaration[]
+  agencyRelationships    PractitionerAgencyRelationship[]
+}
+
+enum PractitionerStatus {
+  ACTIVE
+  INACTIVE
+  MERGED
+}
+
+model PractitionerIdentifier {
+  id             String           @id @default(uuid())
+  practitionerId String
+  practitioner   Practitioner     @relation(fields: [practitionerId], references: [id])
+  system         String // e.g. "HPI-I", "AHPRA", "LOCAL_EMPLOYEE_ID"
+  value          String
+  issuer         String?
+  status         IdentifierStatus @default(ACTIVE)
+  verifiedAt     DateTime?
+  createdAt      DateTime         @default(now())
+
+  @@index([practitionerId])
+}
+
+enum IdentifierStatus {
+  ACTIVE
+  INACTIVE
+}
+
+model Organisation {
+  id        String           @id @default(uuid())
+  type      OrganisationType
+  name      String
+  status    String           @default("ACTIVE")
+  createdAt DateTime         @default(now())
+
+  facilities       Facility[]
+  scopeGrants      ScopeGrant[]              @relation("IssuingOrganisation")
+  areaOfNeed       AreaOfNeedDetermination[]
+  vacancies        Vacancy[]
+  agency           Agency?
+  roleTemplates    RoleTemplate[]
+  sourcingPolicies SourcingPolicy[]
+}
+
+enum OrganisationType {
+  LHN
+  HOSPITAL
+  AGENCY
+  OTHER
+}
+
+model Facility {
+  id             String       @id @default(uuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+  code           String
+  name           String
+  status         String       @default("ACTIVE")
+
+  services             Service[]
+  scopeGrantFacilities ScopeGrantFacility[]
+  vacancies            Vacancy[]
+  areaOfNeed           AreaOfNeedDetermination[]
+  moratoriumStatuses   MoratoriumStatus[]
+  workEpisodes         WorkEpisode[]
+
+  @@index([organisationId])
+}
+
+model Service {
+  id             String   @id @default(uuid())
+  organisationId String
+  facilityId     String
+  facility       Facility @relation(fields: [facilityId], references: [id])
+  code           String
+  name           String
+  serviceGroupId String?
+  status         String   @default("ACTIVE")
+
+  @@index([facilityId])
+}
+
+// ---------------------------------------------------------------------------
+// Credential Wallet (Passport / Assurance bounded contexts)
+// ---------------------------------------------------------------------------
+
+model CredentialDefinition {
+  id                         String             @id @default(uuid())
+  code                       String             @unique // e.g. REG_AHPRA_MEDICAL
+  name                       String
+  category                   CredentialCategory
+  issuerType                 String?
+  validityModel              String? // NO_EXPIRY | EXPLICIT_EXPIRY | CALCULATED_RENEWAL | POINT_IN_TIME
+  requiredFieldsJson         Json?
+  allowedEvidenceTypes       Json?
+  allowedVerificationMethods Json?
+  sensitivity                Sensitivity        @default(STANDARD)
+  shareDefault               Boolean            @default(false)
+  status                     String             @default("PUBLISHED")
+  version                    Int                @default(1)
+
+  credentials PractitionerCredential[]
+}
+
+enum CredentialCategory {
+  REGISTRATION
+  QUALIFICATION
+  TRAINING
+  CHECKS
+  EMPLOYMENT_EXPERIENCE
+  ORGANISATION_ATTESTATION
+  IMMIGRATION_WORK_RIGHTS // added by v0.3 addendum §2
+  ENGLISH_LANGUAGE_TEST // added by v0.3 addendum §2
+  MANDATORY_LEARNING
+  OTHER
+}
+
+enum Sensitivity {
+  STANDARD
+  SENSITIVE_IDENTITY
+  RESTRICTED
+}
+
+model PractitionerCredential {
+  id               String               @id @default(uuid())
+  practitionerId   String
+  practitioner     Practitioner         @relation(fields: [practitionerId], references: [id])
+  definitionId     String
+  definition       CredentialDefinition @relation(fields: [definitionId], references: [id])
+  issuer           String?
+  referenceNumber  String?
+  issueDate        DateTime?
+  expiryDate       DateTime?
+  status           CredentialStatus     @default(DECLARED)
+  registrationType RegistrationType? // v0.3 addendum §2 — Ahpra registration type for supervision/scope interaction
+  attributesJson   Json?
+  createdBy        String?
+  version          Int                  @default(1)
+  createdAt        DateTime             @default(now())
+
+  evidence      CredentialEvidence[]
+  verifications Verification[]
+
+  @@index([practitionerId])
+}
+
+enum CredentialStatus {
+  DECLARED
+  CURRENT
+  EXPIRED
+  SUPERSEDED
+  REVOKED
+}
+
+enum RegistrationType {
+  GENERAL
+  PROVISIONAL
+  LIMITED
+  SUPERVISED_PRACTICE
+}
+
+model CredentialEvidence {
+  id               String                 @id @default(uuid())
+  credentialId     String
+  credential       PractitionerCredential @relation(fields: [credentialId], references: [id])
+  sourceType       EvidenceSourceType
+  objectKey        String?
+  originalFilename String?
+  mimeType         String?
+  sizeBytes        Int?
+  sha256           String?
+  version          Int                    @default(1)
+  sensitivity      Sensitivity            @default(STANDARD)
+  scanStatus       ScanStatus             @default(PENDING)
+  createdBy        String?
+  createdAt        DateTime               @default(now())
+  supersededAt     DateTime?
+
+  verifications Verification[]
+
+  @@index([credentialId])
+}
+
+enum EvidenceSourceType {
+  UPLOAD
+  AUTHORITATIVE_URI
+  API_RESPONSE
+  ORGANISATION_RECORD
+}
+
+enum ScanStatus {
+  PENDING
+  CLEAN
+  QUARANTINED
+}
+
+model Verification {
+  id              String                 @id @default(uuid())
+  credentialId    String
+  credential      PractitionerCredential @relation(fields: [credentialId], references: [id])
+  evidenceId      String?
+  evidence        CredentialEvidence?    @relation(fields: [evidenceId], references: [id])
+  verifierActorId String?
+  verifierOrgId   String?
+  method          VerificationMethod
+  source          String?
+  result          VerificationResult
+  assuranceLevel  String?
+  verifiedAt      DateTime               @default(now())
+  validUntil      DateTime?
+  policyVersion   String?
+  evidenceHash    String?
+  notes           String?
+
+  @@index([credentialId])
+}
+
+enum VerificationMethod {
+  SELF_ATTESTED
+  DOCUMENT_INSPECTION
+  PRIMARY_SOURCE
+  API
+  EMPLOYER_RECORD
+}
+
+enum VerificationResult {
+  VERIFIED
+  PARTIAL
+  FAILED
+  UNABLE
+  REVOKED
+  SUPERSEDED
+}
+
+/// v0.3 addendum §3 — Rural Generalist procedural pathways.
+/// Distinct from PractitionerCredential because currency is usually
+/// case-count/CPD-based rather than a simple expiry date.
+model ProceduralEndorsement {
+  id                  String                    @id @default(uuid())
+  practitionerId      String
+  practitioner        Practitioner              @relation(fields: [practitionerId], references: [id])
+  endorsementType     ProceduralEndorsementType
+  awardingBody        String?
+  awardedAt           DateTime?
+  currencyStatus      String                    @default("CURRENT") // CURRENT | LAPSING | LAPSED
+  caseCountWindowJson Json? // e.g. { requiredCount: 20, windowMonths: 24, currentCount: 14 }
+  createdAt           DateTime                  @default(now())
+
+  @@index([practitionerId])
+}
+
+enum ProceduralEndorsementType {
+  ANAESTHETICS
+  OBSTETRICS
+  OBSTETRICS_SURGICAL
+  SURGERY
+  EMERGENCY_MEDICINE
+  MENTAL_HEALTH
+  ADULT_INTERNAL_MEDICINE
+  PAEDIATRICS
+  INDIGENOUS_HEALTH
+}
+
+// ---------------------------------------------------------------------------
+// Scope & requirements (Scope & Requirements / Eligibility bounded contexts)
+// ---------------------------------------------------------------------------
+
+model RoleTemplate {
+  id                      String       @id @default(uuid())
+  ownerOrgId              String
+  ownerOrg                Organisation @relation(fields: [ownerOrgId], references: [id])
+  code                    String // e.g. ED_SENIOR, RURAL_GENERALIST_OBSTETRICS
+  name                    String
+  serviceType             String?
+  deliveryMode            DeliveryMode @default(IN_PERSON) // v0.3 addendum §4
+  version                 Int          @default(1)
+  status                  String       @default("DRAFT")
+  defaultRequirementSetId String?
+
+  requirementSets RequirementSet[]
+  vacancies       Vacancy[]
+
+  @@index([ownerOrgId])
+}
+
+enum DeliveryMode {
+  IN_PERSON
+  TELEHEALTH_SYNCHRONOUS
+  HYBRID
+}
+
+model RequirementSet {
+  id             String               @id @default(uuid())
+  roleTemplateId String
+  roleTemplate   RoleTemplate         @relation(fields: [roleTemplateId], references: [id])
+  version        Int                  @default(1)
+  effectiveFrom  DateTime             @default(now())
+  effectiveTo    DateTime?
+  status         RequirementSetStatus @default(DRAFT)
+  approvedBy     String?
+  approvedAt     DateTime?
+
+  requirements           Requirement[]
+  eligibilityAssessments EligibilityAssessment[]
+
+  @@index([roleTemplateId])
+}
+
+enum RequirementSetStatus {
+  DRAFT
+  PUBLISHED
+  RETIRED
+}
+
+model Requirement {
+  id               String          @id @default(uuid())
+  requirementSetId String
+  requirementSet   RequirementSet  @relation(fields: [requirementSetId], references: [id])
+  code             String
+  type             RequirementType
+  hard             Boolean         @default(true)
+  evaluator        String
+  parametersJson   Json?
+  failureMessage   String?
+  unknownMessage   String?
+  sortOrder        Int             @default(0)
+
+  results EligibilityResult[]
+
+  @@index([requirementSetId])
+}
+
+enum RequirementType {
+  ACTIVE_SCOPE
+  REGISTRATION
+  CREDENTIAL
+  SPECIALTY
+  EXPERIENCE
+  TRAINING
+  AVAILABILITY
+  FATIGUE // v0.3 addendum §1
+  PROCUREMENT
+  COMMERCIAL
+  PREFERENCE
+  AREA_OF_NEED // v0.3 addendum §2
+  MORATORIUM_LOCATION // v0.3 addendum §2
+  VISA_WORK_RIGHTS // v0.3 addendum §2
+  TELEHEALTH_MEDICARE_ELIGIBILITY // v0.3 addendum §4
+  CROSS_BORDER_PRESCRIBING_AUTHORITY // v0.3 addendum §4
+  TECHNOLOGY_CREDENTIAL // v0.3 addendum §4
+}
+
+/// Organisation-issued clinical authorisation. Never practitioner-editable.
+/// Never inferred from a grant issued by another organisation.
+model ScopeGrant {
+  id                String           @id @default(uuid())
+  practitionerId    String
+  practitioner      Practitioner     @relation(fields: [practitionerId], references: [id])
+  issuingOrgId      String
+  issuingOrg        Organisation     @relation("IssuingOrganisation", fields: [issuingOrgId], references: [id])
+  roleActivityCode  String
+  status            ScopeGrantStatus @default(DRAFT)
+  effectiveFrom     DateTime?
+  effectiveTo       DateTime?
+  restrictionsJson  Json?
+  supervisionLevel  String?
+  decisionReference String?
+  sourceSystem      String?
+  sourceRef         String?
+  sourceVersion     String?
+  supersedesId      String?
+
+  facilities ScopeGrantFacility[]
+
+  @@index([practitionerId])
+  @@index([issuingOrgId])
+}
+
+enum ScopeGrantStatus {
+  DRAFT
+  ACTIVE
+  SUSPENDED
+  EXPIRED
+  WITHDRAWN
+}
+
+model ScopeGrantFacility {
+  scopeGrantId String
+  scopeGrant   ScopeGrant @relation(fields: [scopeGrantId], references: [id])
+  facilityId   String
+  facility     Facility   @relation(fields: [facilityId], references: [id])
+  serviceId    String?
+
+  @@id([scopeGrantId, facilityId])
+}
+
+/// v0.3 addendum §2 — organisation-issued, facility/position-specific.
+/// Never practitioner-portable; never inferred from a determination
+/// issued for a different facility or organisation.
+model AreaOfNeedDetermination {
+  id                   String        @id @default(uuid())
+  practitionerId       String
+  practitioner         Practitioner  @relation(fields: [practitionerId], references: [id])
+  determiningAuthority String
+  organisationId       String?
+  organisation         Organisation? @relation(fields: [organisationId], references: [id])
+  facilityId           String?
+  facility             Facility?     @relation(fields: [facilityId], references: [id])
+  positionRef          String?
+  classification       String
+  effectiveFrom        DateTime?
+  effectiveTo          DateTime?
+  status               String        @default("ACTIVE")
+
+  @@index([practitionerId])
+}
+
+/// v0.3 addendum §2 — Commonwealth 10-year moratorium / District of
+/// Workforce Shortage (DWS) restriction. A location-restriction gate,
+/// independent of ScopeGrant / clinical eligibility.
+model MoratoriumStatus {
+  id             String       @id @default(uuid())
+  practitionerId String
+  practitioner   Practitioner @relation(fields: [practitionerId], references: [id])
+  facilityId     String?
+  facility       Facility?    @relation(fields: [facilityId], references: [id])
+  dwsAreaCode    String?
+  restricted     Boolean      @default(true)
+  effectiveFrom  DateTime?
+  effectiveTo    DateTime?
+  source         String? // e.g. "Department of Health DWS determination"
+
+  @@index([practitionerId])
+}
+
+// ---------------------------------------------------------------------------
+// Preferences & availability
+// ---------------------------------------------------------------------------
+
+model PractitionerPreference {
+  id             String              @id @default(uuid())
+  practitionerId String
+  practitioner   Practitioner        @relation(fields: [practitionerId], references: [id])
+  dimension      PreferenceDimension
+  targetId       String?
+  valueJson      Json?
+  effectiveFrom  DateTime            @default(now())
+  effectiveTo    DateTime?
+
+  @@index([practitionerId])
+}
+
+enum PreferenceDimension {
+  SITE
+  REGION
+  ROLE
+  RATE
+  TRAVEL
+  ACCOMMODATION
+  AGENCY_RELATIONSHIP
+}
+
+model Availability {
+  id             String             @id @default(uuid())
+  practitionerId String
+  practitioner   Practitioner       @relation(fields: [practitionerId], references: [id])
+  startAt        DateTime
+  endAt          DateTime
+  status         AvailabilityStatus @default(AVAILABLE)
+  recurrenceJson Json?
+
+  @@index([practitionerId])
+}
+
+enum AvailabilityStatus {
+  AVAILABLE
+  UNAVAILABLE
+  TENTATIVE
+}
+
+// ---------------------------------------------------------------------------
+// Workforce Exchange
+// ---------------------------------------------------------------------------
+
+model Vacancy {
+  id                      String          @id @default(uuid())
+  organisationId          String
+  organisation            Organisation    @relation(fields: [organisationId], references: [id])
+  facilityId              String
+  facility                Facility        @relation(fields: [facilityId], references: [id])
+  roleTemplateId          String
+  roleTemplate            RoleTemplate    @relation(fields: [roleTemplateId], references: [id])
+  deliveryMode            DeliveryMode    @default(IN_PERSON) // v0.3 addendum §4 — may override RoleTemplate default
+  startAt                 DateTime
+  endAt                   DateTime
+  status                  VacancyStatus   @default(DRAFT)
+  reasonCode              String?
+  rateContextJson         Json?
+  travelAccommodationJson Json?
+  sourcingPolicyId        String?
+  sourcingPolicy          SourcingPolicy? @relation(fields: [sourcingPolicyId], references: [id])
+  version                 Int             @default(1)
+  approvedBy              String?
+  approvedAt              DateTime?
+  createdAt               DateTime        @default(now())
+
+  candidates             Candidate[]
+  eligibilityAssessments EligibilityAssessment[]
+  bookings               Booking[]
+  sourcingRuns           SourcingRun[]
+
+  @@index([organisationId])
+  @@index([facilityId])
+}
+
+enum VacancyStatus {
+  DRAFT
+  APPROVED
+  SOURCING
+  CANDIDATE_SELECTED
+  BOOKED
+  WORKED
+  TIMESHEET_PENDING
+  COMPLETE
+  CANCELLED
+  UNFILLED
+  WITHDRAWN
+}
+
+model SourcingPolicy {
+  id            String       @id @default(uuid())
+  orgId         String
+  organisation  Organisation @relation(fields: [orgId], references: [id])
+  name          String
+  version       Int          @default(1)
+  stagesJson    Json // ordered audience/timing/condition stages
+  status        String       @default("DRAFT")
+  effectiveFrom DateTime?
+  approvedBy    String?
+
+  vacancies    Vacancy[]
+  sourcingRuns SourcingRun[]
+
+  @@index([orgId])
+}
+
+model SourcingRun {
+  id               String         @id @default(uuid())
+  vacancyId        String
+  vacancy          Vacancy        @relation(fields: [vacancyId], references: [id])
+  policyId         String
+  policy           SourcingPolicy @relation(fields: [policyId], references: [id])
+  policyVersion    Int
+  currentStage     String
+  openedAt         DateTime       @default(now())
+  stageHistoryJson Json?
+
+  @@index([vacancyId])
+}
+
+model Candidate {
+  id             String              @id @default(uuid())
+  vacancyId      String
+  vacancy        Vacancy             @relation(fields: [vacancyId], references: [id])
+  practitionerId String
+  practitioner   Practitioner        @relation(fields: [practitionerId], references: [id])
+  sourceType     CandidateSourceType
+  sourceId       String?
+  status         CandidateStatus     @default(DISCOVERED)
+  firstVisibleAt DateTime            @default(now())
+  interestAt     DateTime?
+
+  eligibilityAssessments EligibilityAssessment[]
+  agencyProposal         AgencyProposal?
+
+  @@index([vacancyId])
+  @@index([practitionerId])
+}
+
+enum CandidateSourceType {
+  AGENCY
+  DIRECT
+  INTERNAL
+}
+
+enum CandidateStatus {
+  DISCOVERED
+  NOTIFIED
+  INTERESTED
+  APPLIED
+  AGENCY_PROPOSED
+  ELIGIBILITY_PENDING
+  ELIGIBLE
+  INELIGIBLE
+  SELECTED
+  DECLINED
+  WITHDRAWN
+}
+
+model EligibilityAssessment {
+  id                    String            @id @default(uuid())
+  candidateId           String?
+  candidate             Candidate?        @relation(fields: [candidateId], references: [id])
+  practitionerId        String
+  vacancyId             String
+  vacancy               Vacancy           @relation(fields: [vacancyId], references: [id])
+  requirementSetId      String
+  requirementSet        RequirementSet    @relation(fields: [requirementSetId], references: [id])
+  requirementSetVersion Int
+  status                EligibilityStatus
+  assessedAt            DateTime          @default(now())
+  engineVersion         String
+  expiresAt             DateTime?
+
+  results  EligibilityResult[]
+  bookings Booking[]
+
+  @@index([practitionerId])
+  @@index([vacancyId])
+}
+
+enum EligibilityStatus {
+  ELIGIBLE
+  INELIGIBLE
+  INDETERMINATE
+}
+
+model EligibilityResult {
+  id             String                  @id @default(uuid())
+  assessmentId   String
+  assessment     EligibilityAssessment   @relation(fields: [assessmentId], references: [id])
+  requirementId  String
+  requirement    Requirement             @relation(fields: [requirementId], references: [id])
+  status         RequirementResultStatus
+  explanation    String
+  sourceRefsJson Json?
+  evaluatedAt    DateTime                @default(now())
+
+  @@index([assessmentId])
+}
+
+enum RequirementResultStatus {
+  PASS
+  FAIL
+  UNKNOWN
+}
+
+model Booking {
+  id                      String                 @id @default(uuid())
+  vacancyId               String
+  vacancy                 Vacancy                @relation(fields: [vacancyId], references: [id])
+  practitionerId          String
+  practitioner            Practitioner           @relation(fields: [practitionerId], references: [id])
+  placementId             String?
+  placement               Placement?             @relation(fields: [placementId], references: [id])
+  sourceType              CandidateSourceType
+  sourceId                String?
+  status                  BookingStatus          @default(PENDING_CONFIRMATION)
+  confirmedAt             DateTime?
+  eligibilityAssessmentId String?
+  eligibilityAssessment   EligibilityAssessment? @relation(fields: [eligibilityAssessmentId], references: [id])
+  commercialSnapshotJson  Json?
+  orientationVersion      String?
+  orientationAckAt        DateTime?
+
+  timesheet          Timesheet?
+  workEpisode        WorkEpisode?
+  fatigueAssessments FatigueAssessment[]
+
+  @@index([vacancyId])
+  @@index([practitionerId])
+}
+
+enum BookingStatus {
+  PENDING_CONFIRMATION
+  CONFIRMED
+  CANCELLED_BY_DOCTOR
+  CANCELLED_BY_SERVICE
+  REPLACED
+  WORKED
+  NO_SHOW
+  CLOSED
+}
+
+/// v0.3 addendum §3 — aggregate above Booking for non-contiguous block/
+/// on-call engagements under one arrangement (e.g. rural generalist
+/// procedural coverage: "1 week per month for 6 months").
+model Placement {
+  id             String       @id @default(uuid())
+  practitionerId String
+  practitioner   Practitioner @relation(fields: [practitionerId], references: [id])
+  organisationId String
+  roleTemplateId String
+  startDate      DateTime
+  endDate        DateTime?
+  status         String       @default("ACTIVE")
+
+  bookings Booking[]
+
+  @@index([practitionerId])
+}
+
+// ---------------------------------------------------------------------------
+// Agency & commercial
+// ---------------------------------------------------------------------------
+
+model Agency {
+  id             String       @id @default(uuid())
+  organisationId String       @unique
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+  panelStatus    PanelStatus  @default(ELIGIBLE)
+  categoriesJson Json?
+  effectiveFrom  DateTime?
+  effectiveTo    DateTime?
+
+  agreements    AgencyAgreement[]
+  proposals     AgencyProposal[]
+  relationships PractitionerAgencyRelationship[]
+}
+
+enum PanelStatus {
+  ELIGIBLE
+  SUSPENDED
+  EXPIRED
+  INELIGIBLE
+}
+
+model AgencyAgreement {
+  id            String    @id @default(uuid())
+  agencyId      String
+  agency        Agency    @relation(fields: [agencyId], references: [id])
+  category      String?
+  feeModel      FeeModel
+  termsJson     Json?
+  effectiveFrom DateTime?
+  effectiveTo   DateTime?
+
+  @@index([agencyId])
+}
+
+enum FeeModel {
+  PERCENT
+  FIXED
+  MARKUP
+  OTHER
+}
+
+model AgencyProposal {
+  id                      String               @id @default(uuid())
+  sourcingRunId           String?
+  agencyId                String
+  agency                  Agency               @relation(fields: [agencyId], references: [id])
+  candidateId             String               @unique
+  candidate               Candidate            @relation(fields: [candidateId], references: [id])
+  practitionerId          String?
+  representedIdentityJson Json?
+  rateFeeSnapshotJson     Json?
+  status                  AgencyProposalStatus @default(SUBMITTED)
+  submittedAt             DateTime             @default(now())
+
+  @@index([agencyId])
+}
+
+enum AgencyProposalStatus {
+  SUBMITTED
+  WITHDRAWN
+  ACCEPTED
+  DECLINED
+}
+
+model PractitionerAgencyRelationship {
+  id                       String       @id @default(uuid())
+  practitionerId           String
+  practitioner             Practitioner @relation(fields: [practitionerId], references: [id])
+  agencyId                 String
+  agency                   Agency       @relation(fields: [agencyId], references: [id])
+  effectiveFrom            DateTime?
+  effectiveTo              DateTime?
+  categoryRestrictionsJson Json?
+
+  @@index([practitionerId])
+}
+
+model SourcingException {
+  id         String   @id @default(uuid())
+  vacancyId  String?
+  reason     String
+  authority  String?
+  approvedBy String?
+  evidence   String?
+  createdAt  DateTime @default(now())
+}
+
+// ---------------------------------------------------------------------------
+// Timesheets
+// ---------------------------------------------------------------------------
+
+model Timesheet {
+  id                String          @id @default(uuid())
+  bookingId         String          @unique
+  booking           Booking         @relation(fields: [bookingId], references: [id])
+  status            TimesheetStatus @default(DRAFT)
+  currentVersion    Int             @default(1)
+  submittedAt       DateTime?
+  approvedAt        DateTime?
+  reconciliationRef String?
+
+  versions       TimesheetVersion[]
+  approvalTokens ApprovalToken[]
+}
+
+enum TimesheetStatus {
+  DRAFT
+  SUBMITTED
+  APPROVAL_SENT
+  APPROVED
+  AMENDED
+  REJECTED
+  RECONCILED
+}
+
+model TimesheetVersion {
+  id             String    @id @default(uuid())
+  timesheetId    String
+  timesheet      Timesheet @relation(fields: [timesheetId], references: [id])
+  version        Int
+  startAt        DateTime
+  endAt          DateTime
+  breakMinutes   Int       @default(0)
+  allowancesJson Json?
+  doctorComment  String?
+  createdBy      String?
+  createdAt      DateTime  @default(now())
+
+  @@index([timesheetId])
+}
+
+model ApprovalToken {
+  id              String      @id @default(uuid())
+  timesheetId     String
+  timesheet       Timesheet   @relation(fields: [timesheetId], references: [id])
+  tokenHash       String
+  recipient       String?
+  expiresAt       DateTime
+  status          TokenStatus @default(ACTIVE)
+  challengeStatus String?
+
+  @@index([timesheetId])
+}
+
+enum TokenStatus {
+  ACTIVE
+  USED
+  REVOKED
+  EXPIRED
+}
+
+// ---------------------------------------------------------------------------
+// Locum Experience
+// ---------------------------------------------------------------------------
+
+model ExperienceResponse {
+  id                       String              @id @default(uuid())
+  bookingEpisodeId         String?
+  practitionerId           String
+  practitioner             Practitioner        @relation(fields: [practitionerId], references: [id])
+  practitionerAnalyticsKey String? // pseudonymous key for aggregate reporting
+  siteFacilityId           String?
+  roleTemplateId           String?
+  period                   DateTime?
+  scoresJson               Json
+  freeText                 String?
+  submittedAt              DateTime            @default(now())
+  reportability            ReportabilityStatus @default(PENDING)
+
+  @@index([practitionerId])
+}
+
+enum ReportabilityStatus {
+  PENDING
+  AGGREGATABLE
+  RESTRICTED
+}
+
+model ImprovementAction {
+  id                String    @id @default(uuid())
+  siteFacilityId    String?
+  theme             String?
+  title             String
+  action            String?
+  owner             String?
+  dueDate           DateTime?
+  status            String    @default("OPEN")
+  sourcePeriodStart DateTime?
+  sourcePeriodEnd   DateTime?
+}
+
+// ---------------------------------------------------------------------------
+// Credential sharing
+// ---------------------------------------------------------------------------
+
+model CredentialShare {
+  id               String       @id @default(uuid())
+  practitionerId   String
+  practitioner     Practitioner @relation(fields: [practitionerId], references: [id])
+  recipientLabel   String?
+  recipientContact String?
+  tokenHash        String
+  otpRequired      Boolean      @default(false)
+  expiresAt        DateTime
+  status           ShareStatus  @default(ACTIVE)
+  createdAt        DateTime     @default(now())
+
+  items        ShareItem[]
+  accessEvents ShareAccessEvent[]
+
+  @@index([practitionerId])
+}
+
+enum ShareStatus {
+  ACTIVE
+  REVOKED
+  EXPIRED
+}
+
+model ShareItem {
+  id       String          @id @default(uuid())
+  shareId  String
+  share    CredentialShare @relation(fields: [shareId], references: [id])
+  itemType String
+  itemId   String
+  version  Int?
+
+  @@index([shareId])
+}
+
+model ShareAccessEvent {
+  id           String               @id @default(uuid())
+  shareId      String
+  share        CredentialShare      @relation(fields: [shareId], references: [id])
+  event        ShareAccessEventType
+  occurredAt   DateTime             @default(now())
+  metadataJson Json?
+
+  @@index([shareId])
+}
+
+enum ShareAccessEventType {
+  OPEN
+  VIEW
+  DOWNLOAD
+  FAILED
+}
+
+// ---------------------------------------------------------------------------
+// v0.3 addendum §1 — Fatigue & cross-organisation safety
+// ---------------------------------------------------------------------------
+
+model WorkEpisode {
+  id             String            @id @default(uuid())
+  practitionerId String
+  practitioner   Practitioner      @relation(fields: [practitionerId], references: [id])
+  organisationId String?
+  facilityId     String?
+  facility       Facility?         @relation(fields: [facilityId], references: [id])
+  startAt        DateTime
+  endAt          DateTime
+  source         WorkEpisodeSource
+  assuranceLevel String? // HIGH (platform booking) | DECLARED (self-reported) | PARTNER_FEED
+  bookingId      String?           @unique
+  booking        Booking?          @relation(fields: [bookingId], references: [id])
+  createdAt      DateTime          @default(now())
+
+  @@index([practitionerId])
+}
+
+enum WorkEpisodeSource {
+  PLATFORM_BOOKING
+  SELF_DECLARED
+  PARTNER_FEED
+}
+
+model FatigueRule {
+  id             String               @id @default(uuid())
+  code           String               @unique
+  parametersJson Json
+  effectiveFrom  DateTime             @default(now())
+  effectiveTo    DateTime?
+  status         RequirementSetStatus @default(DRAFT)
+}
+
+model FatigueAssessment {
+  id                     String            @id @default(uuid())
+  practitionerId         String
+  practitioner           Practitioner      @relation(fields: [practitionerId], references: [id])
+  bookingId              String?
+  booking                Booking?          @relation(fields: [bookingId], references: [id])
+  assessedAt             DateTime          @default(now())
+  status                 EligibilityStatus // reuses ELIGIBLE/INELIGIBLE/INDETERMINATE — PASS/FAIL/INDETERMINATE semantics
+  ruleVersion            String?
+  episodesConsideredJson Json?
+
+  @@index([practitionerId])
+}
+
+model FatigueDeclaration {
+  id             String       @id @default(uuid())
+  practitionerId String
+  practitioner   Practitioner @relation(fields: [practitionerId], references: [id])
+  vacancyId      String?
+  declaredAt     DateTime     @default(now())
+  statement      String
+
+  @@index([practitionerId])
+}
+
+// ---------------------------------------------------------------------------
+// Audit
+// ---------------------------------------------------------------------------
+
+model AuditEvent {
+  id            String   @id @default(uuid())
+  correlationId String?
+  eventType     String
+  schemaVersion Int      @default(1)
+  actorId       String?
+  actingOrgId   String?
+  resourceType  String?
+  resourceId    String?
+  action        String?
+  outcome       String?
+  occurredAt    DateTime @default(now())
+  purpose       String?
+  metadataJson  Json?
+
+  @@index([resourceType, resourceId])
+  @@index([occurredAt])
+}
