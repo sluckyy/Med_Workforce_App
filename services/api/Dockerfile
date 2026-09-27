@@ -2,7 +2,7 @@
 # (see docker-compose.yml / .github/workflows, which pass `.` as the context).
 FROM node:20-alpine AS build
 WORKDIR /repo
-COPY package.json package-lock.json ./
+COPY package.json package-lock.json tsconfig.base.json ./
 COPY packages/canonical-model/package.json packages/canonical-model/package.json
 COPY services/api/package.json services/api/package.json
 RUN npm ci
