@@ -3,6 +3,7 @@ import cors from "@fastify/cors";
 import { env } from "./config/env.js";
 import { prisma } from "./prisma.js";
 import { registerIdentityModule } from "./modules/identity/index.js";
+import { registerPassportModule } from "./modules/passport/index.js";
 
 export function buildApp() {
   const app = Fastify({ logger: true });
@@ -12,6 +13,7 @@ export function buildApp() {
   });
 
   registerIdentityModule(app);
+  registerPassportModule(app);
 
   app.get("/health", async () => ({ status: "ok" }));
 
