@@ -97,12 +97,26 @@ deploying, authenticated with a service principal you create yourself.
 
 This is an initial scaffold: the canonical data model (`prisma/schema.prisma`)
 is fleshed out to reflect the full v0.2/v1.0 spec plus the v0.3 addendum, and
-has a real initial migration (`prisma/migrations/`) generated and applied
-against a live PostgreSQL instance, not just written by hand; the API
-exposes a health/readiness check (the latter verifies the database
-connection) and one read endpoint; the web apps are routed placeholder
-screens citing the spec section each will implement, each showing a live
-"API connectivity" indicator, intended as a concrete starting point for
-co-design sessions rather than a finished product. Nothing here has been
-through privacy, security or clinical safety review — do not point it at
-real practitioner data.
+has real migrations (`prisma/migrations/`) generated and applied against a
+live PostgreSQL instance, not just written by hand; the API exposes a
+health/readiness check (the latter verifies the database connection) and one
+read endpoint; the web apps are routed placeholder screens citing the spec
+section each will implement, each showing a live "API connectivity"
+indicator, intended as a concrete starting point for co-design sessions
+rather than a finished product. Nothing here has been through privacy,
+security or clinical safety review — do not point it at real practitioner
+data.
+
+The **Identity & Access** bounded context (`services/api/src/modules/identity`)
+is the first module built out past its stub: password auth, short-lived JWT
+access tokens, rotating opaque refresh tokens (hashed at rest, reuse
+detection on rotation), and coarse RBAC via `OrganisationMembership` against
+the role vocabulary in the spec's §24 RBAC/ABAC table. Doctors self-register
+(`POST /v1/auth/register`); organisation staff accounts are provisioned by an
+existing `PLATFORM_SECURITY_ADMIN` (`POST /v1/organisations/:id/members`)
+rather than self-serve, since an organisation role grants access to other
+people's data. Every auth action is appended to the `audit` module's
+`AuditEvent` stream. Known gaps, not silent omissions: MFA is modelled
+(`User.mfaEnabled`) but not enforced (no TOTP flow yet), and staff
+provisioning sets a temporary password directly rather than emailing an
+invite link. The other eleven bounded contexts remain stubs.

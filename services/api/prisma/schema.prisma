@@ -20,7 +20,97 @@ datasource db {
 }
 
 // ---------------------------------------------------------------------------
-// Identity & organisation
+// Identity & Access
+// ---------------------------------------------------------------------------
+// Owns: user accounts, authentication, MFA, roles, organisation membership
+// (services/api/src/modules/identity). Does not own clinical credentials or
+// scope — see modules/passport, modules/scope.
+//
+// Role vocabulary follows docs/spec/01-technical-architecture-data-model-v0.2.docx
+// §24 (RBAC and ABAC model). DOCTOR is deliberately not an OrganisationRole:
+// practitioners authenticate via User.practitionerId, not organisation
+// membership, matching §4's "Identity & Access does not own: clinical
+// credentials or scope". TIMESHEET_APPROVER is deliberately absent too — §33
+// specifies a single-purpose token (see ApprovalToken), not a platform
+// account with a persistent role.
+
+model User {
+  id           String       @id @default(uuid())
+  email        String       @unique
+  passwordHash String
+  status       UserStatus   @default(ACTIVE)
+  mfaEnabled   Boolean      @default(false)
+  // Staff accounts (no linked Practitioner) carry their own display name.
+  // Doctor accounts leave this null and use Practitioner.displayName instead.
+  displayName  String?
+
+  // A Doctor-persona account links 1:1 to their Practitioner record. Staff
+  // accounts (organisation members) leave this null.
+  practitionerId String?       @unique
+  practitioner   Practitioner? @relation(fields: [practitionerId], references: [id])
+
+  lastLoginAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  memberships   OrganisationMembership[]
+  refreshTokens RefreshToken[]
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+  LOCKED
+}
+
+model OrganisationMembership {
+  id             String                       @id @default(uuid())
+  userId         String
+  user           User                         @relation(fields: [userId], references: [id])
+  organisationId String
+  organisation   Organisation                 @relation(fields: [organisationId], references: [id])
+  role           OrganisationRole
+  status         OrganisationMembershipStatus @default(ACTIVE)
+  createdAt      DateTime                     @default(now())
+
+  @@unique([userId, organisationId, role])
+  @@index([organisationId])
+}
+
+enum OrganisationMembershipStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum OrganisationRole {
+  MEDICAL_WORKFORCE
+  CREDENTIAL_OFFICER
+  SCOPE_APPROVER
+  AGENCY_USER
+  SITE_LEADER
+  PROCUREMENT
+  FINANCE
+  STATE_ANALYST
+  PLATFORM_SECURITY_ADMIN
+}
+
+// Opaque, hashed-at-rest refresh tokens so a session can be revoked (logout,
+// compromise) without invalidating every other session. Mirrors the
+// hashed-at-rest pattern already used for Timesheet.ApprovalToken.
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// Core practitioner & organisation
 // ---------------------------------------------------------------------------
 
 model Practitioner {
@@ -33,6 +123,7 @@ model Practitioner {
   createdAt   DateTime           @default(now())
   updatedAt   DateTime           @updatedAt
 
+  user                   User?
   identifiers            PractitionerIdentifier[]
   credentials            PractitionerCredential[]
   proceduralEndorsements ProceduralEndorsement[]
@@ -85,6 +176,7 @@ model Organisation {
   createdAt DateTime         @default(now())
 
   facilities       Facility[]
+  memberships      OrganisationMembership[]
   scopeGrants      ScopeGrant[]              @relation("IssuingOrganisation")
   areaOfNeed       AreaOfNeedDetermination[]
   vacancies        Vacancy[]

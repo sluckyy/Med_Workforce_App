@@ -89,3 +89,28 @@ export const ProceduralEndorsementType = {
 } as const;
 export type ProceduralEndorsementType =
   (typeof ProceduralEndorsementType)[keyof typeof ProceduralEndorsementType];
+
+// Identity & Access (docs/spec/01-technical-architecture-data-model-v0.2.docx
+// §24 RBAC and ABAC model). DOCTOR is not an OrganisationRole — practitioners
+// authenticate via User.practitionerId, not organisation membership.
+// TIMESHEET_APPROVER is also absent — §33 specifies a single-purpose token
+// (ApprovalToken), not a platform account with a persistent role.
+export const OrganisationRole = {
+  MEDICAL_WORKFORCE: "MEDICAL_WORKFORCE",
+  CREDENTIAL_OFFICER: "CREDENTIAL_OFFICER",
+  SCOPE_APPROVER: "SCOPE_APPROVER",
+  AGENCY_USER: "AGENCY_USER",
+  SITE_LEADER: "SITE_LEADER",
+  PROCUREMENT: "PROCUREMENT",
+  FINANCE: "FINANCE",
+  STATE_ANALYST: "STATE_ANALYST",
+  PLATFORM_SECURITY_ADMIN: "PLATFORM_SECURITY_ADMIN",
+} as const;
+export type OrganisationRole = (typeof OrganisationRole)[keyof typeof OrganisationRole];
+
+export const UserStatus = {
+  ACTIVE: "ACTIVE",
+  DISABLED: "DISABLED",
+  LOCKED: "LOCKED",
+} as const;
+export type UserStatus = (typeof UserStatus)[keyof typeof UserStatus];
