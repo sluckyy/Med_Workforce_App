@@ -18,7 +18,7 @@ on:
     inputs:
       resource_group:
         description: Resource group to create/use
-        default: medworkforce-pilot-rg
+        default: med_wf_aus
         required: true
       location:
         description: Azure region

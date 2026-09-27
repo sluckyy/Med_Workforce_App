@@ -74,13 +74,13 @@ drive it yourself from the Azure CLI.
 ## 2. Create the infrastructure
 
 ```bash
-az group create -n medworkforce-pilot-rg -l australiaeast
+az group create -n med_wf_aus -l australiaeast
 
 export PG_ADMIN_PASSWORD='<strong password>'
 export JWT_SECRET_KEY="$(openssl rand -base64 32)"
 
 az deployment group create \
-  -g medworkforce-pilot-rg \
+  -g med_wf_aus \
   -f infra/azure/main.bicep \
   -p infra/azure/main.bicepparam \
   --parameters postgresAdminPassword="$PG_ADMIN_PASSWORD" jwtSecretKey="$JWT_SECRET_KEY" \
@@ -108,7 +108,7 @@ pilot. Scale them via the template parameters when real load requires it.
    ```bash
    az ad sp create-for-rbac --name medworkforce-github-deploy \
      --role Contributor \
-     --scopes /subscriptions/<subscription-id>/resourceGroups/medworkforce-pilot-rg \
+     --scopes /subscriptions/<subscription-id>/resourceGroups/med_wf_aus \
      --sdk-auth
    ```
 
@@ -132,9 +132,9 @@ az acr build -r $ACR -t medworkforce-api:manual --file services/api/Dockerfile .
 az acr build -r $ACR -t medworkforce-doctor-web:manual --file apps/doctor-web/Dockerfile .
 az acr build -r $ACR -t medworkforce-hospital-web:manual --file apps/hospital-web/Dockerfile .
 LOGIN=$(az acr show -n $ACR --query loginServer -o tsv)
-az containerapp update -g medworkforce-pilot-rg -n medwfpilot-api      --image $LOGIN/medworkforce-api:manual
-az containerapp update -g medworkforce-pilot-rg -n medwfpilot-doctor   --image $LOGIN/medworkforce-doctor-web:manual
-az containerapp update -g medworkforce-pilot-rg -n medwfpilot-hospital --image $LOGIN/medworkforce-hospital-web:manual
+az containerapp update -g med_wf_aus -n medwfpilot-api      --image $LOGIN/medworkforce-api:manual
+az containerapp update -g med_wf_aus -n medwfpilot-doctor   --image $LOGIN/medworkforce-doctor-web:manual
+az containerapp update -g med_wf_aus -n medwfpilot-hospital --image $LOGIN/medworkforce-hospital-web:manual
 ```
 
 On start-up the API container runs `prisma migrate deploy`, so a fresh
@@ -143,7 +143,7 @@ environment comes up with the full schema with no manual migration step.
 ## 4. First-run checks
 
 ```bash
-API=$(az containerapp show -g medworkforce-pilot-rg -n medwfpilot-api --query properties.configuration.ingress.fqdn -o tsv)
+API=$(az containerapp show -g med_wf_aus -n medwfpilot-api --query properties.configuration.ingress.fqdn -o tsv)
 curl https://$API/health
 curl https://$API/health/ready   # checks the database connection
 ```
@@ -154,7 +154,7 @@ quick way to confirm the whole chain works end to end.
 
 ## 5. Custom domains and TLS
 
-`az containerapp hostname add -g medworkforce-pilot-rg -n <app> --hostname <your-domain>`,
+`az containerapp hostname add -g med_wf_aus -n <app> --hostname <your-domain>`,
 create the CNAME/TXT records it prints, then
 `az containerapp hostname bind ... --environment medwfpilot-env --validation-method CNAME`
 for a managed certificate. Redeploy the Bicep with the real hostnames if you
