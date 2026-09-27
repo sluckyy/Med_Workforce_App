@@ -33,6 +33,8 @@ imposed upfront — see the same document, §6.
   rural generalist procedural pathways, telehealth/virtual care, a
   multi-jurisdiction legal framework, and the adaptive governance approach
   actually being used for this build.
+- `docs/DEPLOY_AZURE.md` — how to put this live on Azure Container Apps so
+  others can give feedback, including the one-click GitHub Actions path.
 
 ## Repository layout
 
@@ -40,15 +42,19 @@ imposed upfront — see the same document, §6.
 docs/
   spec/                 founding specification set (source documents)
   addendum/              v0.3 addendum (this build's amendments)
+  DEPLOY_AZURE.md         how to run this live on Azure
 packages/
   canonical-model/       shared TypeScript enums/types (API + web apps)
 services/
   api/                   Fastify + Prisma modular monolith
     prisma/schema.prisma  canonical data model — start here to understand the domain
+    prisma/migrations/     versioned migration history (generated, applied and verified against a real Postgres before commit)
     src/modules/          one folder per bounded context (see below)
 apps/
   doctor-web/             practitioner-facing PWA (React + Vite)
   hospital-web/           workforce/credentialling-facing web app (React + Vite)
+infra/azure/main.bicep    Container Apps + PostgreSQL Flexible Server + ACR
+.github/workflows/        provision-azure.yml (first deploy), deploy-azure.yml (every push to main)
 ```
 
 ### Bounded contexts (`services/api/src/modules/`)
@@ -73,12 +79,30 @@ npm run dev:doctor-web      # http://localhost:5173
 npm run dev:hospital-web    # http://localhost:5174
 ```
 
+## Deploying to Azure (so others can see it and give feedback)
+
+See `docs/DEPLOY_AZURE.md` for the full walkthrough. Short version: add three
+GitHub repository secrets (`AZURE_CREDENTIALS`, `PG_ADMIN_PASSWORD`,
+`JWT_SECRET_KEY`), then run the **Provision Azure (first deployment)**
+workflow from the Actions tab. It creates everything (Container Apps,
+PostgreSQL, ACR), builds and deploys all three images, and prints the
+doctor-web and hospital-web URLs in the job summary. After that, every push
+to `main` deploys automatically via **Deploy to Azure Container Apps**.
+
+I (the assistant) have no credentials into your Azure tenant and cannot
+provision anything there directly — the GitHub Actions workflow does the
+deploying, authenticated with a service principal you create yourself.
+
 ## Status
 
 This is an initial scaffold: the canonical data model (`prisma/schema.prisma`)
-is fleshed out to reflect the full v0.2/v1.0 spec plus the v0.3 addendum: the
-API exposes a health check and one read endpoint; the web apps are routed
-placeholder screens citing the spec section each will implement, intended as
-a concrete starting point for co-design sessions rather than a finished
-product. Nothing here has been through privacy, security or clinical safety
-review — do not point it at real practitioner data.
+is fleshed out to reflect the full v0.2/v1.0 spec plus the v0.3 addendum, and
+has a real initial migration (`prisma/migrations/`) generated and applied
+against a live PostgreSQL instance, not just written by hand; the API
+exposes a health/readiness check (the latter verifies the database
+connection) and one read endpoint; the web apps are routed placeholder
+screens citing the spec section each will implement, each showing a live
+"API connectivity" indicator, intended as a concrete starting point for
+co-design sessions rather than a finished product. Nothing here has been
+through privacy, security or clinical safety review — do not point it at
+real practitioner data.

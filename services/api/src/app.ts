@@ -12,6 +12,17 @@ export function buildApp() {
 
   app.get("/health", async () => ({ status: "ok" }));
 
+  app.get("/health/ready", async (_request, reply) => {
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+      return { status: "ok" };
+    } catch (err) {
+      app.log.error(err);
+      reply.code(503);
+      return { status: "unavailable" };
+    }
+  });
+
   app.get("/v1/role-templates", async () => {
     // Placeholder for the Scope & Requirements bounded context
     // (services/api/src/modules/scope). Replace with a real query once

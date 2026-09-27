@@ -1,0 +1,115 @@
+name: Deploy to Azure Container Apps
+
+# Builds all three images in Azure Container Registry and rolls them out to
+# the api, doctor-web and hospital-web container apps created by
+# infra/azure/main.bicep (run "Provision Azure (first deployment)" once,
+# first).
+#
+# Required repository secret: AZURE_CREDENTIALS (same one used for provisioning).
+# Optional repository variables override the defaults created by the
+# provisioning workflow: AZURE_RESOURCE_GROUP, AZURE_ACR_NAME, AZURE_API_APP,
+# AZURE_DOCTOR_WEB_APP, AZURE_HOSPITAL_WEB_APP.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "packages/**"
+      - "services/api/**"
+      - "apps/**"
+      - ".github/workflows/deploy-azure.yml"
+
+concurrency:
+  group: deploy-azure
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP || 'medworkforce-pilot-rg' }}
+      ACR_NAME: ${{ vars.AZURE_ACR_NAME }}
+      API_APP: ${{ vars.AZURE_API_APP || 'medwfpilot-api' }}
+      DOCTOR_WEB_APP: ${{ vars.AZURE_DOCTOR_WEB_APP || 'medwfpilot-doctor' }}
+      HOSPITAL_WEB_APP: ${{ vars.AZURE_HOSPITAL_WEB_APP || 'medwfpilot-hospital' }}
+      TAG: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Resolve container registry
+        run: |
+          if [ -z "$ACR_NAME" ]; then
+            ACR_NAME=$(az acr list -g "$RESOURCE_GROUP" --query "[0].name" -o tsv)
+            echo "ACR_NAME=$ACR_NAME" >> "$GITHUB_ENV"
+          fi
+          echo "Using registry: $ACR_NAME in $RESOURCE_GROUP"
+
+      - name: Resolve API URL (for the web apps' build-time fallback)
+        run: |
+          API_FQDN=$(az containerapp show -n "$API_APP" -g "$RESOURCE_GROUP" --query properties.configuration.ingress.fqdn -o tsv)
+          echo "API_URL=https://$API_FQDN" >> "$GITHUB_ENV"
+
+      - name: Build API image in ACR
+        run: |
+          az acr build \
+            --registry "$ACR_NAME" \
+            --image "medworkforce-api:$TAG" \
+            --image "medworkforce-api:latest" \
+            --file services/api/Dockerfile .
+
+      - name: Build doctor-web image in ACR
+        run: |
+          az acr build \
+            --registry "$ACR_NAME" \
+            --image "medworkforce-doctor-web:$TAG" \
+            --image "medworkforce-doctor-web:latest" \
+            --build-arg VITE_API_BASE_URL="$API_URL" \
+            --file apps/doctor-web/Dockerfile .
+
+      - name: Build hospital-web image in ACR
+        run: |
+          az acr build \
+            --registry "$ACR_NAME" \
+            --image "medworkforce-hospital-web:$TAG" \
+            --image "medworkforce-hospital-web:latest" \
+            --build-arg VITE_API_BASE_URL="$API_URL" \
+            --file apps/hospital-web/Dockerfile .
+
+      - name: Roll out API
+        run: |
+          LOGIN_SERVER=$(az acr show -n "$ACR_NAME" --query loginServer -o tsv)
+          az containerapp update \
+            --name "$API_APP" \
+            --resource-group "$RESOURCE_GROUP" \
+            --image "$LOGIN_SERVER/medworkforce-api:$TAG"
+
+      - name: Roll out doctor-web
+        run: |
+          LOGIN_SERVER=$(az acr show -n "$ACR_NAME" --query loginServer -o tsv)
+          az containerapp update \
+            --name "$DOCTOR_WEB_APP" \
+            --resource-group "$RESOURCE_GROUP" \
+            --image "$LOGIN_SERVER/medworkforce-doctor-web:$TAG"
+
+      - name: Roll out hospital-web
+        run: |
+          LOGIN_SERVER=$(az acr show -n "$ACR_NAME" --query loginServer -o tsv)
+          az containerapp update \
+            --name "$HOSPITAL_WEB_APP" \
+            --resource-group "$RESOURCE_GROUP" \
+            --image "$LOGIN_SERVER/medworkforce-hospital-web:$TAG"
+
+      - name: Smoke test
+        run: |
+          for i in $(seq 1 20); do
+            if curl -fsS "$API_URL/health" && curl -fsS "$API_URL/health/ready"; then
+              echo "API healthy"; exit 0
+            fi
+            echo "waiting for API ($i)"; sleep 15
+          done
+          echo "API did not become healthy"; exit 1

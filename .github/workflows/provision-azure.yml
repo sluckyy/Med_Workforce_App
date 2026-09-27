@@ -1,0 +1,207 @@
+name: Provision Azure (first deployment)
+
+# One-click first deployment. Creates the resource group and all Azure
+# resources from infra/azure/main.bicep, builds all three images in ACR,
+# rolls them out, and records the app names as repository variables so the
+# regular "Deploy to Azure Container Apps" workflow can take over.
+#
+# Required repository secrets:
+#   AZURE_CREDENTIALS   - JSON from: az ad sp create-for-rbac --name medworkforce-github --role Contributor \
+#                           --scopes /subscriptions/<subscription-id> --sdk-auth
+#   PG_ADMIN_PASSWORD   - PostgreSQL admin password (16+ chars, letters+digits+symbols)
+#   JWT_SECRET_KEY      - 32+ random characters
+#
+# Safe to re-run: the Bicep deployment is idempotent.
+
+on:
+  workflow_dispatch:
+    inputs:
+      resource_group:
+        description: Resource group to create/use
+        default: medworkforce-pilot-rg
+        required: true
+      location:
+        description: Azure region
+        default: australiaeast
+        required: true
+      environment_name:
+        description: Environment label used in resource names (pilot, staging, prod)
+        default: pilot
+        required: true
+      name_prefix:
+        description: Resource name prefix (3-12 lowercase letters/digits)
+        default: medwf
+        required: true
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    env:
+      RG: ${{ inputs.resource_group }}
+      LOCATION: ${{ inputs.location }}
+      ENV_NAME: ${{ inputs.environment_name }}
+      PREFIX: ${{ inputs.name_prefix }}
+      TAG: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check required secrets
+        env:
+          AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
+          PG_ADMIN_PASSWORD: ${{ secrets.PG_ADMIN_PASSWORD }}
+          JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
+        run: |
+          missing=""
+          for name in AZURE_CREDENTIALS PG_ADMIN_PASSWORD JWT_SECRET_KEY; do
+            if [ -z "${!name}" ]; then missing="$missing $name"; fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secrets:$missing"; exit 1
+          fi
+          if [ "${#JWT_SECRET_KEY}" -lt 32 ]; then
+            echo "::error::JWT_SECRET_KEY must be at least 32 characters"; exit 1
+          fi
+
+      - uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Register resource providers
+        run: |
+          for ns in Microsoft.App Microsoft.OperationalInsights Microsoft.DBforPostgreSQL Microsoft.ContainerRegistry; do
+            az provider register --namespace "$ns" --wait >/dev/null
+          done
+
+      - name: Create resource group
+        run: az group create --name "$RG" --location "$LOCATION" --output none
+
+      - name: Deploy infrastructure (Bicep)
+        id: infra
+        env:
+          PG_ADMIN_PASSWORD: ${{ secrets.PG_ADMIN_PASSWORD }}
+          JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
+        run: |
+          az deployment group create \
+            --resource-group "$RG" \
+            --name "medworkforce-provision-${TAG:0:12}" \
+            --template-file infra/azure/main.bicep \
+            --parameters \
+              namePrefix="$PREFIX" \
+              environmentName="$ENV_NAME" \
+              postgresAdminPassword="$PG_ADMIN_PASSWORD" \
+              jwtSecretKey="$JWT_SECRET_KEY" \
+            --query properties.outputs -o json > outputs.json
+          for key in acrName acrLoginServer apiAppName doctorWebAppName hospitalWebAppName apiUrl doctorWebUrl hospitalWebUrl postgresServer; do
+            value=$(jq -r ".${key}.value" outputs.json)
+            echo "${key}=${value}" >> "$GITHUB_OUTPUT"
+          done
+
+      - name: Build images in ACR
+        run: |
+          az acr build --registry "${{ steps.infra.outputs.acrName }}" \
+            --image "medworkforce-api:$TAG" --image "medworkforce-api:latest" \
+            --file services/api/Dockerfile .
+          az acr build --registry "${{ steps.infra.outputs.acrName }}" \
+            --image "medworkforce-doctor-web:$TAG" --image "medworkforce-doctor-web:latest" \
+            --build-arg VITE_API_BASE_URL="${{ steps.infra.outputs.apiUrl }}" \
+            --file apps/doctor-web/Dockerfile .
+          az acr build --registry "${{ steps.infra.outputs.acrName }}" \
+            --image "medworkforce-hospital-web:$TAG" --image "medworkforce-hospital-web:latest" \
+            --build-arg VITE_API_BASE_URL="${{ steps.infra.outputs.apiUrl }}" \
+            --file apps/hospital-web/Dockerfile .
+
+      - name: Roll out images (re-run Bicep with real images)
+        env:
+          PG_ADMIN_PASSWORD: ${{ secrets.PG_ADMIN_PASSWORD }}
+          JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
+          LOGIN_SERVER: ${{ steps.infra.outputs.acrLoginServer }}
+        run: |
+          az deployment group create \
+            --resource-group "$RG" \
+            --name "medworkforce-rollout-${TAG:0:12}" \
+            --template-file infra/azure/main.bicep \
+            --parameters \
+              namePrefix="$PREFIX" \
+              environmentName="$ENV_NAME" \
+              postgresAdminPassword="$PG_ADMIN_PASSWORD" \
+              jwtSecretKey="$JWT_SECRET_KEY" \
+              apiImage="$LOGIN_SERVER/medworkforce-api:$TAG" \
+              doctorWebImage="$LOGIN_SERVER/medworkforce-doctor-web:$TAG" \
+              hospitalWebImage="$LOGIN_SERVER/medworkforce-hospital-web:$TAG" \
+            --output none
+
+      - name: Smoke test
+        env:
+          API_URL: ${{ steps.infra.outputs.apiUrl }}
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS "$API_URL/health" && curl -fsS "$API_URL/health/ready"; then
+              echo; echo "API healthy"; exit 0
+            fi
+            echo "waiting for API ($i)"; sleep 15
+          done
+          echo "::error::API did not become healthy at $API_URL"; exit 1
+
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          for app in "${{ steps.infra.outputs.apiAppName }}" "${{ steps.infra.outputs.doctorWebAppName }}" "${{ steps.infra.outputs.hospitalWebAppName }}"; do
+            [ -z "$app" ] && continue
+            echo "=================== $app: revisions ==================="
+            az containerapp revision list -g "$RG" -n "$app" \
+              --query "[].{name:name,active:properties.active,health:properties.healthState,running:properties.runningState,replicas:properties.replicas,created:properties.createdTime}" -o table || true
+            echo "=================== $app: system log (tail) ==================="
+            az containerapp logs show -g "$RG" -n "$app" --type system --tail 60 || true
+            echo "=================== $app: console log (tail) ==================="
+            az containerapp logs show -g "$RG" -n "$app" --type console --tail 120 || true
+          done
+
+      - name: Save repository variables for the deploy workflow
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          # Requires a token with "Variables: write"; the default GITHUB_TOKEN cannot, in
+          # which case the deploy workflow falls back to the default names anyway.
+          gh variable set AZURE_RESOURCE_GROUP --body "$RG" \
+          && gh variable set AZURE_ACR_NAME --body "${{ steps.infra.outputs.acrName }}" \
+          && gh variable set AZURE_API_APP --body "${{ steps.infra.outputs.apiAppName }}" \
+          && gh variable set AZURE_DOCTOR_WEB_APP --body "${{ steps.infra.outputs.doctorWebAppName }}" \
+          && gh variable set AZURE_HOSPITAL_WEB_APP --body "${{ steps.infra.outputs.hospitalWebAppName }}" \
+          && echo "Repository variables saved." \
+          || echo "::warning::Could not set repository variables automatically; add them manually (values in the job summary)."
+
+      - name: Summary
+        run: |
+          {
+            echo "## Medical Workforce Passport & Exchange deployed"
+            echo
+            echo "| Item | Value |"
+            echo "| --- | --- |"
+            echo "| Doctor web app | ${{ steps.infra.outputs.doctorWebUrl }} |"
+            echo "| Hospital web app | ${{ steps.infra.outputs.hospitalWebUrl }} |"
+            echo "| API | ${{ steps.infra.outputs.apiUrl }} |"
+            echo "| Resource group | $RG |"
+            echo "| Container registry | ${{ steps.infra.outputs.acrName }} |"
+            echo "| API app | ${{ steps.infra.outputs.apiAppName }} |"
+            echo "| Doctor web app (container app) | ${{ steps.infra.outputs.doctorWebAppName }} |"
+            echo "| Hospital web app (container app) | ${{ steps.infra.outputs.hospitalWebAppName }} |"
+            echo "| PostgreSQL | ${{ steps.infra.outputs.postgresServer }} |"
+            echo
+            echo "Repository variables for the *Deploy to Azure Container Apps* workflow:"
+            echo
+            echo '```'
+            echo "AZURE_RESOURCE_GROUP=$RG"
+            echo "AZURE_ACR_NAME=${{ steps.infra.outputs.acrName }}"
+            echo "AZURE_API_APP=${{ steps.infra.outputs.apiAppName }}"
+            echo "AZURE_DOCTOR_WEB_APP=${{ steps.infra.outputs.doctorWebAppName }}"
+            echo "AZURE_HOSPITAL_WEB_APP=${{ steps.infra.outputs.hospitalWebAppName }}"
+            echo '```'
+            echo
+            echo "This is a pilot/co-design deployment (docs/addendum/v0.3-addendum.md §6) —"
+            echo "no real practitioner data belongs here until privacy/security review (§5) is done."
+          } >> "$GITHUB_STEP_SUMMARY"
