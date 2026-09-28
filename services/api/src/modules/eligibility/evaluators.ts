@@ -9,7 +9,7 @@
  * point for the platform-wide invariant that missing data must never
  * default to ELIGIBLE.
  */
-import type { Prisma, PrismaClient, Requirement } from "@prisma/client";
+import type { Prisma, PrismaClient, Requirement, RequirementSet } from "@prisma/client";
 
 export interface EvaluatorContext {
   prisma: PrismaClient;
@@ -190,4 +190,55 @@ export async function runEvaluator(
     };
   }
   return evaluator(requirement, ctx);
+}
+
+export interface RequirementResult {
+  requirementId: string;
+  code: string;
+  type: string;
+  hard: boolean;
+  status: "PASS" | "FAIL" | "UNKNOWN";
+  explanation: string;
+}
+
+export type OverallStatus = "ELIGIBLE" | "INELIGIBLE" | "INDETERMINATE";
+
+// The single rollup rule, shared by every caller (the stateless
+// POST /v1/eligibility/evaluate and modules/exchange's persisted
+// assessment) so they can never silently diverge. Only hard requirements
+// gate the overall status; FAIL always outranks UNKNOWN — see
+// docs/spec/01-technical-architecture-data-model-v0.2.docx §46.
+export async function evaluateRequirementSet(
+  prisma: PrismaClient,
+  requirementSet: RequirementSet & { requirements: Requirement[] },
+  practitionerId: string,
+  opts: { asOf?: Date; window?: { startAt: Date; endAt: Date } } = {},
+): Promise<{ status: OverallStatus; assessedAt: Date; results: RequirementResult[] }> {
+  const assessedAt = opts.asOf ?? new Date();
+  const results = await Promise.all(
+    requirementSet.requirements.map(async (requirement) => {
+      const result = await runEvaluator(requirement, {
+        prisma,
+        practitionerId,
+        asOf: assessedAt,
+        window: opts.window,
+      });
+      return {
+        requirementId: requirement.id,
+        code: requirement.code,
+        type: requirement.type,
+        hard: requirement.hard,
+        ...result,
+      };
+    }),
+  );
+
+  const hardResults = results.filter((r) => r.hard);
+  const status: OverallStatus = hardResults.some((r) => r.status === "FAIL")
+    ? "INELIGIBLE"
+    : hardResults.some((r) => r.status === "UNKNOWN")
+      ? "INDETERMINATE"
+      : "ELIGIBLE";
+
+  return { status, assessedAt, results };
 }

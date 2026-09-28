@@ -7,6 +7,7 @@ import { registerPassportModule } from "./modules/passport/index.js";
 import { registerScopeModule } from "./modules/scope/index.js";
 import { registerEligibilityModule } from "./modules/eligibility/index.js";
 import { registerAssuranceModule } from "./modules/assurance/index.js";
+import { registerExchangeModule } from "./modules/exchange/index.js";
 
 export function buildApp() {
   const app = Fastify({ logger: true });
@@ -20,6 +21,7 @@ export function buildApp() {
   registerScopeModule(app);
   registerEligibilityModule(app);
   registerAssuranceModule(app);
+  registerExchangeModule(app);
 
   app.get("/health", async () => ({ status: "ok" }));
 

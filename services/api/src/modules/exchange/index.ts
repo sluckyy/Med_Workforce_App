@@ -13,5 +13,21 @@
  * modes; only the requirement set and travel/accommodation fields differ.
  *
  * See docs/spec/01-technical-architecture-data-model-v0.2.docx §4, §17-18.
+ *
+ * Status: the core loop — create a Vacancy (draft -> approve -> open for
+ * candidates), a practitioner applies, staff runs a real *persisted*
+ * EligibilityAssessment against it (this is what modules/eligibility's
+ * stateless /evaluate endpoint was missing — see its module doc), staff
+ * selects an ELIGIBLE candidate (never any other status — enforced, not
+ * just conventional) which creates a Booking, and the practitioner
+ * confirms it. No SourcingPolicy/SourcingRun/Agency workflow (that's
+ * modules/commercial's territory) and no Placement (the addendum's
+ * non-contiguous block-booking aggregate) — both left as gaps rather than
+ * half-built.
  */
-export {};
+import type { FastifyInstance } from "fastify";
+import { registerExchangeRoutes } from "./routes.js";
+
+export function registerExchangeModule(app: FastifyInstance) {
+  registerExchangeRoutes(app);
+}

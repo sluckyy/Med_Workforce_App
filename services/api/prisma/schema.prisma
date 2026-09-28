@@ -716,6 +716,9 @@ model Candidate {
   eligibilityAssessments EligibilityAssessment[]
   agencyProposal         AgencyProposal?
 
+  // One candidacy per practitioner per vacancy — re-applying updates the
+  // existing row rather than creating a duplicate.
+  @@unique([vacancyId, practitionerId])
   @@index([vacancyId])
   @@index([practitionerId])
 }
