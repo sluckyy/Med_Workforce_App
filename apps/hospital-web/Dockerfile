@@ -4,7 +4,7 @@
 # docker-compose.yml / .github/workflows, which pass `.` as the build context).
 FROM node:20-alpine AS build
 WORKDIR /repo
-COPY package.json package-lock.json ./
+COPY package.json package-lock.json tsconfig.base.json ./
 COPY packages/canonical-model/package.json packages/canonical-model/package.json
 COPY apps/hospital-web/package.json apps/hospital-web/package.json
 RUN npm ci

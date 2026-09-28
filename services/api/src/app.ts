@@ -2,6 +2,11 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import { env } from "./config/env.js";
 import { prisma } from "./prisma.js";
+import { registerIdentityModule } from "./modules/identity/index.js";
+import { registerPassportModule } from "./modules/passport/index.js";
+import { registerScopeModule } from "./modules/scope/index.js";
+import { registerEligibilityModule } from "./modules/eligibility/index.js";
+import { registerAssuranceModule } from "./modules/assurance/index.js";
 
 export function buildApp() {
   const app = Fastify({ logger: true });
@@ -9,6 +14,12 @@ export function buildApp() {
   app.register(cors, {
     origin: env.corsAllowedOrigins.length > 0 ? env.corsAllowedOrigins : true,
   });
+
+  registerIdentityModule(app);
+  registerPassportModule(app);
+  registerScopeModule(app);
+  registerEligibilityModule(app);
+  registerAssuranceModule(app);
 
   app.get("/health", async () => ({ status: "ok" }));
 
@@ -21,13 +32,6 @@ export function buildApp() {
       reply.code(503);
       return { status: "unavailable" };
     }
-  });
-
-  app.get("/v1/role-templates", async () => {
-    // Placeholder for the Scope & Requirements bounded context
-    // (services/api/src/modules/scope). Replace with a real query once
-    // the practitioner/organisation auth model lands.
-    return prisma.roleTemplate.findMany({ take: 20 });
   });
 
   return app;

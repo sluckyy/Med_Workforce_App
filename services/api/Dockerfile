@@ -1,8 +1,11 @@
 # Builds from the monorepo root so npm workspace hoisting resolves correctly
 # (see docker-compose.yml / .github/workflows, which pass `.` as the context).
 FROM node:20-alpine AS build
+# Prisma's engine binaries are dynamically linked against OpenSSL, which
+# Alpine's node image does not ship by default.
+RUN apk add --no-cache openssl
 WORKDIR /repo
-COPY package.json package-lock.json ./
+COPY package.json package-lock.json tsconfig.base.json ./
 COPY packages/canonical-model/package.json packages/canonical-model/package.json
 COPY services/api/package.json services/api/package.json
 RUN npm ci
@@ -12,6 +15,7 @@ RUN npm run prisma:generate --workspace services/api
 RUN npm run build --workspace services/api
 
 FROM node:20-alpine
+RUN apk add --no-cache openssl
 WORKDIR /app
 # npm workspaces hoist all dependencies to the repo root, so the runtime
 # image needs that whole tree, not services/api/node_modules (which npm
