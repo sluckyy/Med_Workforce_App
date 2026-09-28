@@ -10,6 +10,7 @@ import VacancyDetail from "./pages/VacancyDetail.js";
 import Booking from "./pages/Booking.js";
 import Timesheet from "./pages/Timesheet.js";
 import Experience from "./pages/Experience.js";
+import Security from "./pages/Security.js";
 
 const nav = [
   { to: "/", label: "Home", end: true },
@@ -20,6 +21,7 @@ const nav = [
   { to: "/booking", label: "Booking" },
   { to: "/timesheet", label: "Timesheet" },
   { to: "/experience", label: "Experience" },
+  { to: "/security", label: "Security" },
 ];
 
 export default function App() {
@@ -82,6 +84,7 @@ function Shell() {
             <Route path="/booking" element={<Booking />} />
             <Route path="/timesheet" element={<Timesheet />} />
             <Route path="/experience" element={<Experience />} />
+            <Route path="/security" element={<Security />} />
           </Routes>
         )}
       </main>

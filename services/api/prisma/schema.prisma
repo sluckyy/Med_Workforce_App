@@ -39,7 +39,18 @@ model User {
   email        String       @unique
   passwordHash String
   status       UserStatus   @default(ACTIVE)
-  mfaEnabled   Boolean      @default(false)
+  // mfaEnabled only flips true once the user has confirmed a live TOTP
+  // code against mfaSecret (see modules/identity's mfa routes) — an
+  // enrollment in progress (secret generated, not yet confirmed) leaves
+  // this false. mfaSecret is stored in plaintext: a real deployment
+  // should envelope-encrypt it (e.g. Key Vault-wrapped DEK), not
+  // implemented here — documented gap, not a silent one.
+  mfaEnabled          Boolean  @default(false)
+  mfaSecret           String?
+  // Bcrypt-hashed one-time recovery codes, consumed (removed from the
+  // array) as they're used. Generated once, shown to the user exactly
+  // once, at confirm-enrollment time.
+  mfaBackupCodesHashed Json?
   // Staff accounts (no linked Practitioner) carry their own display name.
   // Doctor accounts leave this null and use Practitioner.displayName instead.
   displayName  String?

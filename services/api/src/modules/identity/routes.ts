@@ -9,7 +9,17 @@ import {
   hashRefreshToken,
   REFRESH_TOKEN_TTL_MS,
   signAccessToken,
+  signMfaChallengeToken,
+  verifyMfaChallengeToken,
 } from "./tokens.js";
+import {
+  consumeBackupCode,
+  generateBackupCodes,
+  generateTotpSecret,
+  hashBackupCodes,
+  totpQrCodeDataUrl,
+  verifyTotpCode,
+} from "./mfa.js";
 
 const PASSWORD_MIN_LENGTH = 12;
 
@@ -131,6 +141,19 @@ export function registerIdentityRoutes(app: FastifyInstance) {
       return;
     }
 
+    if (user.mfaEnabled) {
+      // Correct password, but no session yet — the challenge token proves
+      // "password was correct" without granting any access until
+      // /v1/auth/mfa/login also succeeds.
+      await recordAuditEvent(prisma, {
+        eventType: "auth.login",
+        actorId: user.id,
+        outcome: "mfa_challenge",
+      });
+      reply.send({ mfaRequired: true, mfaChallengeToken: signMfaChallengeToken(user.id) });
+      return;
+    }
+
     await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
     await recordAuditEvent(prisma, {
       eventType: "auth.login",
@@ -142,6 +165,80 @@ export function registerIdentityRoutes(app: FastifyInstance) {
     reply.send({
       user: { id: user.id, email: user.email, practitionerId: user.practitionerId },
       ...session,
+    });
+  });
+
+  const mfaLoginBody = z.object({
+    mfaChallengeToken: z.string().min(1),
+    code: z.string().min(1),
+  });
+
+  app.post("/v1/auth/mfa/login", async (request, reply) => {
+    const parsed = mfaLoginBody.safeParse(request.body);
+    if (!parsed.success) {
+      reply.code(400).send({ error: "Invalid request", details: parsed.error.flatten() });
+      return;
+    }
+
+    let userId: string;
+    try {
+      userId = verifyMfaChallengeToken(parsed.data.mfaChallengeToken).sub;
+    } catch {
+      reply.code(401).send({ error: "Invalid or expired MFA challenge" });
+      return;
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user || !user.mfaEnabled || !user.mfaSecret || user.status !== "ACTIVE") {
+      reply.code(401).send({ error: "Invalid or expired MFA challenge" });
+      return;
+    }
+
+    const codeOk = await verifyTotpCode(parsed.data.code, user.mfaSecret);
+    let remainingBackupCodes: string[] | null = null;
+    if (!codeOk) {
+      const hashedCodes = (user.mfaBackupCodesHashed as string[] | null) ?? [];
+      remainingBackupCodes = await consumeBackupCode(parsed.data.code, hashedCodes);
+    }
+
+    if (!codeOk && !remainingBackupCodes) {
+      await recordAuditEvent(prisma, {
+        eventType: "auth.mfa.verify",
+        actorId: user.id,
+        outcome: "failure",
+      });
+      reply.code(401).send({ error: "Invalid code" });
+      return;
+    }
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        lastLoginAt: new Date(),
+        ...(remainingBackupCodes ? { mfaBackupCodesHashed: remainingBackupCodes } : {}),
+      },
+    });
+    await recordAuditEvent(prisma, {
+      eventType: "auth.mfa.verify",
+      actorId: user.id,
+      outcome: "success",
+      metadata: { method: codeOk ? "totp" : "backup_code" },
+    });
+    await recordAuditEvent(prisma, {
+      eventType: "auth.login",
+      actorId: user.id,
+      outcome: "success",
+      metadata: { mfa: true },
+    });
+
+    const session = await issueSession(user.id, user.practitionerId);
+    reply.send({
+      user: { id: user.id, email: user.email, practitionerId: user.practitionerId },
+      ...session,
+      // Surfaced so the client can nudge the user to re-enroll once
+      // they're running low — losing every backup code with an
+      // inaccessible authenticator is a permanent lockout.
+      remainingBackupCodes: remainingBackupCodes?.length,
     });
   });
 
@@ -228,6 +325,105 @@ export function registerIdentityRoutes(app: FastifyInstance) {
         role: m.role,
       })),
     });
+  });
+
+  const mfaCodeBody = z.object({ code: z.string().min(1) });
+
+  app.post("/v1/auth/mfa/enroll", { preHandler: app.authenticate }, async (request, reply) => {
+    const user = await prisma.user.findUniqueOrThrow({ where: { id: request.authUser!.id } });
+    if (user.mfaEnabled) {
+      reply.code(409).send({ error: "MFA is already enabled — disable it first to re-enroll" });
+      return;
+    }
+
+    // Generating a fresh secret discards any prior unconfirmed enrollment
+    // attempt, which is fine: mfaEnabled only flips true once /confirm
+    // succeeds, so an abandoned enrollment never granted anything.
+    const secret = generateTotpSecret();
+    await prisma.user.update({ where: { id: user.id }, data: { mfaSecret: secret } });
+
+    reply.send({ secret, qrCodeDataUrl: await totpQrCodeDataUrl(user.email, secret) });
+  });
+
+  app.post("/v1/auth/mfa/confirm", { preHandler: app.authenticate }, async (request, reply) => {
+    const parsed = mfaCodeBody.safeParse(request.body);
+    if (!parsed.success) {
+      reply.code(400).send({ error: "Invalid request", details: parsed.error.flatten() });
+      return;
+    }
+    const user = await prisma.user.findUniqueOrThrow({ where: { id: request.authUser!.id } });
+    if (user.mfaEnabled) {
+      reply.code(409).send({ error: "MFA is already enabled" });
+      return;
+    }
+    if (!user.mfaSecret) {
+      reply.code(409).send({ error: "Call /v1/auth/mfa/enroll first" });
+      return;
+    }
+    if (!(await verifyTotpCode(parsed.data.code, user.mfaSecret))) {
+      await recordAuditEvent(prisma, {
+        eventType: "auth.mfa.enable",
+        actorId: user.id,
+        outcome: "failure",
+      });
+      reply.code(401).send({ error: "Invalid code" });
+      return;
+    }
+
+    const backupCodes = generateBackupCodes();
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { mfaEnabled: true, mfaBackupCodesHashed: await hashBackupCodes(backupCodes) },
+    });
+    await recordAuditEvent(prisma, {
+      eventType: "auth.mfa.enable",
+      actorId: user.id,
+      outcome: "success",
+    });
+
+    // The only time these plaintext codes ever leave the server — store
+    // them somewhere safe, the response won't include them again.
+    reply.send({ backupCodes });
+  });
+
+  app.post("/v1/auth/mfa/disable", { preHandler: app.authenticate }, async (request, reply) => {
+    const parsed = mfaCodeBody.safeParse(request.body);
+    if (!parsed.success) {
+      reply.code(400).send({ error: "Invalid request", details: parsed.error.flatten() });
+      return;
+    }
+    const user = await prisma.user.findUniqueOrThrow({ where: { id: request.authUser!.id } });
+    if (!user.mfaEnabled || !user.mfaSecret) {
+      reply.code(409).send({ error: "MFA is not enabled" });
+      return;
+    }
+
+    // Disabling MFA is itself step-up sensitive — being logged in isn't
+    // enough; a current code (or a backup code) must also be presented,
+    // same bar as verifying at login.
+    const codeOk = await verifyTotpCode(parsed.data.code, user.mfaSecret);
+    const hashedCodes = (user.mfaBackupCodesHashed as string[] | null) ?? [];
+    const backupOk = codeOk ? null : await consumeBackupCode(parsed.data.code, hashedCodes);
+    if (!codeOk && !backupOk) {
+      await recordAuditEvent(prisma, {
+        eventType: "auth.mfa.disable",
+        actorId: user.id,
+        outcome: "failure",
+      });
+      reply.code(401).send({ error: "Invalid code" });
+      return;
+    }
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { mfaEnabled: false, mfaSecret: null, mfaBackupCodesHashed: Prisma.JsonNull },
+    });
+    await recordAuditEvent(prisma, {
+      eventType: "auth.mfa.disable",
+      actorId: user.id,
+      outcome: "success",
+    });
+    reply.code(204).send();
   });
 
   // Staff provisioning is admin-gated rather than self-serve: an

@@ -7,6 +7,7 @@ import CandidateComparison from "./pages/CandidateComparison.js";
 import ScopeView from "./pages/ScopeView.js";
 import AssuranceQueue from "./pages/AssuranceQueue.js";
 import ExperienceDashboard from "./pages/ExperienceDashboard.js";
+import Security from "./pages/Security.js";
 
 const nav = [
   { to: "/", label: "Dashboard", end: true },
@@ -15,6 +16,7 @@ const nav = [
   { to: "/scope", label: "Credential / scope view" },
   { to: "/assurance", label: "Assurance queue" },
   { to: "/experience", label: "Experience dashboard" },
+  { to: "/security", label: "Security" },
 ];
 
 export default function App() {
@@ -74,6 +76,7 @@ function Shell() {
             <Route path="/scope" element={<ScopeView />} />
             <Route path="/assurance" element={<AssuranceQueue />} />
             <Route path="/experience" element={<ExperienceDashboard />} />
+            <Route path="/security" element={<Security />} />
           </Routes>
         )}
       </main>
