@@ -1,35 +1,57 @@
-import { useEffect, useState } from "react";
-import PagePlaceholder from "./PagePlaceholder.js";
-import { getApiBaseUrl } from "../config.js";
-
-type ApiStatus = "checking" | "ok" | "unreachable";
+import { useAuth } from "../lib/auth-context.js";
 
 export default function Dashboard() {
-  const [apiStatus, setApiStatus] = useState<ApiStatus>("checking");
+  const { user, activeOrgId, setActiveOrgId } = useAuth();
 
-  useEffect(() => {
-    const apiBaseUrl = getApiBaseUrl();
-    fetch(`${apiBaseUrl}/health`)
-      .then((res) => setApiStatus(res.ok ? "ok" : "unreachable"))
-      .catch(() => setApiStatus("unreachable"));
-  }, []);
+  if (!user) return null;
 
   return (
-    <>
-      <p style={{ fontSize: 13, color: apiStatus === "ok" ? "#0a7a2f" : "#a33" }}>
-        API connectivity: {apiStatus}
+    <section>
+      <h2>Dashboard</h2>
+      <p style={{ fontSize: 13, color: "#555" }}>
+        Signed in as {user.displayName ?? user.email}
       </p>
-      <PagePlaceholder
-        title="Dashboard"
-        specRef="docs/spec/02-ynlhn-mvp-product-spec-v1.0.docx §9 (Hospital / Dashboard)"
-        minimumContent={[
-          "Vacancy pulse and urgent gaps",
-          "Sourcing stage",
-          "Pending approvals",
-          "Booked shifts / placements (docs/addendum/v0.3-addendum.md §3)",
-          "Timesheets",
-        ]}
-      />
-    </>
+
+      <h3 style={{ marginTop: 24, fontSize: 15 }}>Your organisations</h3>
+      <ul style={{ listStyle: "none", padding: 0 }}>
+        {user.memberships.map((m) => (
+          <li
+            key={`${m.organisationId}-${m.role}`}
+            style={{
+              border: "1px solid " + (m.organisationId === activeOrgId ? "#333" : "#ddd"),
+              borderRadius: 6,
+              padding: 10,
+              marginBottom: 8,
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <div>
+              <div style={{ fontWeight: 600 }}>{m.organisationName}</div>
+              <div style={{ fontSize: 12, color: "#666" }}>{m.role.replaceAll("_", " ")}</div>
+            </div>
+            {m.organisationId === activeOrgId ? (
+              <span style={{ fontSize: 12, color: "#0a7a2f", fontWeight: 600 }}>Active</span>
+            ) : (
+              <button type="button" onClick={() => setActiveOrgId(m.organisationId)} style={{ padding: "4px 10px" }}>
+                Switch to this org
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+      {user.memberships.length === 0 && (
+        <p style={{ color: "#a33" }}>
+          Your account has no organisation membership yet — nothing below will work until a
+          PLATFORM_SECURITY_ADMIN adds you to one.
+        </p>
+      )}
+
+      <p style={{ fontSize: 13, color: "#666", marginTop: 24 }}>
+        Use the nav above to manage scope grants, review credentials awaiting verification,
+        or create and staff vacancies for your active organisation.
+      </p>
+    </section>
   );
 }

@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { OrganisationRole } from "@prisma/client";
 import { prisma } from "../../prisma.js";
-import { runEvaluator } from "./evaluators.js";
+import { evaluateRequirementSet } from "./evaluators.js";
 
 const STAFF_READ_ROLES: OrganisationRole[] = ["MEDICAL_WORKFORCE", "CREDENTIAL_OFFICER", "SCOPE_APPROVER"];
 
@@ -52,38 +52,12 @@ export function registerEligibilityRoutes(app: FastifyInstance) {
       return;
     }
 
-    const effectiveAsOf = asOf ?? new Date();
-    const results = await Promise.all(
-      requirementSet.requirements.map(async (requirement) => {
-        const result = await runEvaluator(requirement, {
-          prisma,
-          practitionerId,
-          asOf: effectiveAsOf,
-          window,
-        });
-        return {
-          requirementId: requirement.id,
-          code: requirement.code,
-          type: requirement.type,
-          hard: requirement.hard,
-          ...result,
-        };
-      }),
+    const { status, assessedAt, results } = await evaluateRequirementSet(
+      prisma,
+      requirementSet,
+      practitionerId,
+      { asOf, window },
     );
-
-    // Only hard requirements gate the overall status — a soft (hard:
-    // false) requirement, e.g. a procurement/commercial check, can still
-    // fail without making the practitioner clinically ineligible (see
-    // docs/spec/01-technical-architecture-data-model-v0.2.docx §46's
-    // "clinically eligible; sourcing/procurement requirement prevents
-    // booking at current stage" fixture). FAIL always outranks UNKNOWN:
-    // a known failure is never softened by an unrelated unknown.
-    const hardResults = results.filter((r) => r.hard);
-    const status = hardResults.some((r) => r.status === "FAIL")
-      ? "INELIGIBLE"
-      : hardResults.some((r) => r.status === "UNKNOWN")
-        ? "INDETERMINATE"
-        : "ELIGIBLE";
 
     reply.send({
       practitionerId,
@@ -98,7 +72,7 @@ export function registerEligibilityRoutes(app: FastifyInstance) {
         },
       },
       status,
-      assessedAt: effectiveAsOf,
+      assessedAt,
       results,
     });
   });

@@ -4,10 +4,13 @@ import { Prisma, CredentialStatus } from "@prisma/client";
 import { prisma } from "../../prisma.js";
 import { recordAuditEvent } from "../audit/index.js";
 
-// Every route in this module is the practitioner acting on their own
-// record — there is no "view another practitioner's passport" endpoint
-// here. That belongs to modules/assurance or modules/scope (an
-// organisation's credentialling/scope workflow), which do not exist yet.
+// Every route below this point is the practitioner acting on their own
+// record — viewing another practitioner's full passport belongs to
+// modules/assurance or modules/scope, not here. The one exception is the
+// staff-facing practitioner lookup right below: any organisation staff
+// member can resolve an email to a practitioner id (name + email only,
+// nothing sensitive), because modules/scope's issue-a-grant and other
+// staff workflows need a way to find who they're acting on.
 function requirePractitioner(request: FastifyRequest, reply: FastifyReply) {
   if (!request.authUser?.practitionerId) {
     reply.code(403).send({ error: "Forbidden" });
@@ -93,6 +96,27 @@ function serializeCredentialSummary(
 }
 
 export function registerPassportRoutes(app: FastifyInstance) {
+  app.get("/v1/practitioners", { preHandler: app.authenticate }, async (request, reply) => {
+    // Staff-only (any organisation membership qualifies — this returns
+    // nothing more sensitive than the name/email the caller already typed
+    // in to search for); a bare practitioner account gets 403.
+    if (!request.authUser?.memberships.length) {
+      reply.code(403).send({ error: "Forbidden" });
+      return;
+    }
+    const { email } = request.query as { email?: string };
+    if (!email) {
+      reply.code(400).send({ error: "email query parameter is required" });
+      return;
+    }
+    const practitioner = await prisma.practitioner.findUnique({ where: { email } });
+    if (!practitioner) {
+      reply.code(404).send({ error: "Not found" });
+      return;
+    }
+    reply.send({ id: practitioner.id, displayName: practitioner.displayName, email: practitioner.email });
+  });
+
   app.get(
     "/v1/passport/credential-definitions",
     { preHandler: app.authenticate },

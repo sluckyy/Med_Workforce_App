@@ -82,6 +82,20 @@ export function registerScopeRoutes(app: FastifyInstance) {
   // to reference; this is just enough to create them, not that module's
   // full ownership (departments/services, status lifecycle, etc.).
   // -------------------------------------------------------------------
+  app.get(
+    "/v1/organisations/:organisationId",
+    { preHandler: [app.authenticate, app.requireOrgRoleAtParam("organisationId", ...READ_ROLES)] },
+    async (request, reply) => {
+      const { organisationId } = request.params as { organisationId: string };
+      const organisation = await prisma.organisation.findUnique({ where: { id: organisationId } });
+      if (!organisation) {
+        reply.code(404).send({ error: "Not found" });
+        return;
+      }
+      reply.send(organisation);
+    },
+  );
+
   app.post(
     "/v1/organisations/:organisationId/facilities",
     { preHandler: [app.authenticate, app.requireOrgRoleAtParam("organisationId", ...AUTHOR_ROLES)] },

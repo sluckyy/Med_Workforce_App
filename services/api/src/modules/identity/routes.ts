@@ -208,7 +208,9 @@ export function registerIdentityRoutes(app: FastifyInstance) {
   app.get("/v1/auth/me", { preHandler: app.authenticate }, async (request, reply) => {
     const user = await prisma.user.findUniqueOrThrow({
       where: { id: request.authUser!.id },
-      include: { memberships: { where: { status: "ACTIVE" } } },
+      include: {
+        memberships: { where: { status: "ACTIVE" }, include: { organisation: true } },
+      },
     });
     reply.send({
       id: user.id,
@@ -217,8 +219,12 @@ export function registerIdentityRoutes(app: FastifyInstance) {
       mfaEnabled: user.mfaEnabled,
       displayName: user.displayName,
       practitionerId: user.practitionerId,
+      // Embedding the organisation name here (rather than requiring a
+      // separate "list my organisations" call) is what lets a multi-org
+      // staff member's Dashboard show real names instead of raw ids.
       memberships: user.memberships.map((m) => ({
         organisationId: m.organisationId,
+        organisationName: m.organisation.name,
         role: m.role,
       })),
     });
