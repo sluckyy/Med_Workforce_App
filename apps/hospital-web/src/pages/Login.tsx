@@ -2,23 +2,83 @@ import { useState, type FormEvent } from "react";
 import { useAuth, ApiError } from "../lib/auth-context.js";
 
 export default function Login() {
-  const { login } = useAuth();
+  const { login, mfaLogin } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [mfaChallengeToken, setMfaChallengeToken] = useState<string | null>(null);
+  const [code, setCode] = useState("");
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
     setError(null);
     setSubmitting(true);
     try {
-      await login(email, password);
+      const result = await login(email, password);
+      if (result) setMfaChallengeToken(result.mfaChallengeToken);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong. Try again.");
     } finally {
       setSubmitting(false);
     }
+  }
+
+  async function onMfaSubmit(event: FormEvent) {
+    event.preventDefault();
+    if (!mfaChallengeToken) return;
+    setError(null);
+    setSubmitting(true);
+    try {
+      const { remainingBackupCodes } = await mfaLogin(mfaChallengeToken, code);
+      if (typeof remainingBackupCodes === "number" && remainingBackupCodes <= 2) {
+        // Best-effort nudge — running low on backup codes with no
+        // authenticator access left is a permanent lockout.
+        window.alert(
+          `You used a backup code. Only ${remainingBackupCodes} left — consider re-enrolling MFA from Security settings soon.`,
+        );
+      }
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Invalid code. Try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (mfaChallengeToken) {
+    return (
+      <section style={{ maxWidth: 360, margin: "48px auto" }}>
+        <h2>Two-factor verification</h2>
+        <p style={{ fontSize: 13, color: "#666" }}>
+          Enter the 6-digit code from your authenticator app, or one of your backup codes.
+        </p>
+        <form onSubmit={onMfaSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <input
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            required
+            autoFocus
+            placeholder="123456 or XXXXX-XXXXX"
+            style={{ padding: 8 }}
+          />
+          {error && <p style={{ color: "#a33", fontSize: 13 }}>{error}</p>}
+          <button type="submit" disabled={submitting} style={{ padding: 10 }}>
+            {submitting ? "Verifying…" : "Verify"}
+          </button>
+        </form>
+        <button
+          type="button"
+          onClick={() => {
+            setMfaChallengeToken(null);
+            setCode("");
+            setError(null);
+          }}
+          style={{ marginTop: 16, background: "none", border: "none", textDecoration: "underline", cursor: "pointer", padding: 0 }}
+        >
+          &larr; Back to sign in
+        </button>
+      </section>
+    );
   }
 
   return (
