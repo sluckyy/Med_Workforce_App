@@ -15,5 +15,21 @@
  * Fatigue (docs/addendum/v0.3-addendum.md §1) follows the same
  * PASS/FAIL/INDETERMINATE pattern via modules/fatigue, evaluated as one
  * requirement among the RequirementSet rather than a separate gate.
+ *
+ * Status: POST /v1/eligibility/evaluate is a stateless dry-run — it
+ * computes and returns a result without persisting an EligibilityAssessment
+ * row, because that model requires a Vacancy (modules/exchange, not built
+ * yet). Real evaluators exist for ACTIVE_SCOPE, REGISTRATION,
+ * CREDENTIAL/TRAINING and AVAILABILITY (see evaluators.ts); every other
+ * RequirementType resolves UNKNOWN via the same "no implementation ->
+ * never an optimistic PASS" fallback, not a silent skip. All five fixture
+ * scenarios from spec §46 that don't require a persisted Vacancy were
+ * checked against this engine before commit — see the module's test notes
+ * in the commit message.
  */
-export {};
+import type { FastifyInstance } from "fastify";
+import { registerEligibilityRoutes } from "./routes.js";
+
+export function registerEligibilityModule(app: FastifyInstance) {
+  registerEligibilityRoutes(app);
+}

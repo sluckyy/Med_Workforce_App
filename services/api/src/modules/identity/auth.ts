@@ -19,6 +19,10 @@ declare module "fastify" {
     requireOrgRole: (
       ...roles: OrganisationRole[]
     ) => (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
+    requireOrgRoleAtParam: (
+      paramName: string,
+      ...roles: OrganisationRole[]
+    ) => (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
   }
 }
 
@@ -69,6 +73,24 @@ export function registerAuth(app: FastifyInstance) {
   app.decorate("requireOrgRole", (...roles: OrganisationRole[]) => {
     return async (request: FastifyRequest, reply: FastifyReply) => {
       const hasRole = request.authUser?.memberships.some((m) => roles.includes(m.role));
+      if (!hasRole) {
+        reply.code(403).send({ error: "Forbidden" });
+      }
+    };
+  });
+
+  // Unlike requireOrgRole (true if the role holds at ANY organisation),
+  // this checks the role holds specifically at the organisation named by
+  // request.params[paramName] — required for any org-scoped write (e.g. a
+  // CREDENTIAL_OFFICER at Org A must not be able to issue a ScopeGrant at
+  // Org B just because the route only checked "some CREDENTIAL_OFFICER
+  // membership exists somewhere").
+  app.decorate("requireOrgRoleAtParam", (paramName: string, ...roles: OrganisationRole[]) => {
+    return async (request: FastifyRequest, reply: FastifyReply) => {
+      const organisationId = (request.params as Record<string, string>)[paramName];
+      const hasRole = request.authUser?.memberships.some(
+        (m) => m.organisationId === organisationId && roles.includes(m.role),
+      );
       if (!hasRole) {
         reply.code(403).send({ error: "Forbidden" });
       }
