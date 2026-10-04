@@ -1,4 +1,4 @@
-import { NavLink, Route, Routes } from "react-router-dom";
+import { NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { AuthProvider, useAuth } from "./lib/auth-context.js";
 import Login from "./pages/Login.js";
 import Home from "./pages/Home.js";
@@ -11,6 +11,7 @@ import Booking from "./pages/Booking.js";
 import Timesheet from "./pages/Timesheet.js";
 import Experience from "./pages/Experience.js";
 import Security from "./pages/Security.js";
+import ApprovalPage from "./pages/ApprovalPage.js";
 
 const nav = [
   { to: "/", label: "Home", end: true },
@@ -34,42 +35,54 @@ export default function App() {
 
 function Shell() {
   const { user, loading, logout } = useAuth();
+  const location = useLocation();
+  // The external timesheet approver never has a platform account at all
+  // (docs/spec/01-technical-architecture-data-model-v0.2.docx §24, §33) —
+  // this one path has to work with no login, so it's carved out of the
+  // auth gate below rather than living inside the authenticated Routes.
+  const isPublicApproval = location.pathname.startsWith("/approve/");
 
   return (
     <div style={{ fontFamily: "system-ui, sans-serif", maxWidth: 720, margin: "0 auto", padding: 16 }}>
-      <header style={{ marginBottom: 24 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-          <h1 style={{ fontSize: 20 }}>Medical Workforce Passport — Doctor</h1>
-          {user && (
-            <button
-              type="button"
-              onClick={() => void logout()}
-              style={{ background: "none", border: "none", textDecoration: "underline", cursor: "pointer", fontSize: 13 }}
-            >
-              Sign out ({user.displayName ?? user.email})
-            </button>
-          )}
-        </div>
-        {user && (
-          <nav style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 8 }}>
-            {nav.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.end}
-                style={({ isActive }) => ({
-                  textDecoration: isActive ? "underline" : "none",
-                  fontWeight: isActive ? 600 : 400,
-                })}
+      {!isPublicApproval && (
+        <header style={{ marginBottom: 24 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+            <h1 style={{ fontSize: 20 }}>Medical Workforce Passport — Doctor</h1>
+            {user && (
+              <button
+                type="button"
+                onClick={() => void logout()}
+                style={{ background: "none", border: "none", textDecoration: "underline", cursor: "pointer", fontSize: 13 }}
               >
-                {item.label}
-              </NavLink>
-            ))}
-          </nav>
-        )}
-      </header>
+                Sign out ({user.displayName ?? user.email})
+              </button>
+            )}
+          </div>
+          {user && (
+            <nav style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 8 }}>
+              {nav.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  end={item.end}
+                  style={({ isActive }) => ({
+                    textDecoration: isActive ? "underline" : "none",
+                    fontWeight: isActive ? 600 : 400,
+                  })}
+                >
+                  {item.label}
+                </NavLink>
+              ))}
+            </nav>
+          )}
+        </header>
+      )}
       <main>
-        {loading ? (
+        {isPublicApproval ? (
+          <Routes>
+            <Route path="/approve/:token" element={<ApprovalPage />} />
+          </Routes>
+        ) : loading ? (
           <p>Loading…</p>
         ) : !user ? (
           <Login />
