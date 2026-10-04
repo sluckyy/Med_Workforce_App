@@ -16,16 +16,17 @@
  * PASS/FAIL/INDETERMINATE pattern via modules/fatigue, evaluated as one
  * requirement among the RequirementSet rather than a separate gate.
  *
- * Status: POST /v1/eligibility/evaluate is a stateless dry-run — it
- * computes and returns a result without persisting an EligibilityAssessment
- * row, because that model requires a Vacancy (modules/exchange, not built
- * yet). Real evaluators exist for ACTIVE_SCOPE, REGISTRATION,
- * CREDENTIAL/TRAINING and AVAILABILITY (see evaluators.ts); every other
- * RequirementType resolves UNKNOWN via the same "no implementation ->
- * never an optimistic PASS" fallback, not a silent skip. All five fixture
- * scenarios from spec §46 that don't require a persisted Vacancy were
- * checked against this engine before commit — see the module's test notes
- * in the commit message.
+ * Status: POST /v1/eligibility/evaluate is a stateless dry-run; a real
+ * Vacancy also gets a persisted EligibilityAssessment via
+ * modules/exchange's own assess endpoint, using this same
+ * evaluateRequirementSet function so the two can never silently diverge.
+ * Real evaluators exist for ACTIVE_SCOPE, REGISTRATION, CREDENTIAL/
+ * TRAINING, AVAILABILITY, AREA_OF_NEED and MORATORIUM_LOCATION (see
+ * evaluators.ts — VISA_WORK_RIGHTS reuses the CREDENTIAL evaluator
+ * against the IMMIGRATION_WORK_RIGHTS_VISA definition rather than needing
+ * its own); every other RequirementType resolves UNKNOWN via the same "no
+ * implementation -> never an optimistic PASS" fallback, not a silent
+ * skip.
  */
 import type { FastifyInstance } from "fastify";
 import { registerEligibilityRoutes } from "./routes.js";

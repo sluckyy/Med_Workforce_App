@@ -31,6 +31,9 @@ const EVALUATOR_OPTIONS = [
   { value: "activeScopeAtFacility", type: "ACTIVE_SCOPE", label: "Active scope grant for a role/activity code", paramKey: "roleActivityCode", paramLabel: "Role/activity code (e.g. ED_SENIOR)" },
   { value: "registrationCurrent", type: "REGISTRATION", label: "Registration current (credential code)", paramKey: "definitionCode", paramLabel: "Credential code (e.g. REG_AHPRA_MEDICAL)" },
   { value: "credentialCurrent", type: "CREDENTIAL", label: "Credential/training current (credential code)", paramKey: "definitionCode", paramLabel: "Credential code (e.g. TRAINING_ALS)" },
+  { value: "credentialCurrent", type: "VISA_WORK_RIGHTS", label: "Visa work rights current", paramKey: "definitionCode", paramLabel: "Credential code", paramDefault: "IMMIGRATION_WORK_RIGHTS_VISA" },
+  { value: "areaOfNeedCurrent", type: "AREA_OF_NEED", label: "Area of Need determination at facility", paramKey: "facilityId", paramLabel: "Facility" },
+  { value: "moratoriumLocationClear", type: "MORATORIUM_LOCATION", label: "Not blocked by moratorium/DWS status at facility", paramKey: "facilityId", paramLabel: "Facility" },
 ];
 
 export default function VacancyEditor() {
@@ -90,7 +93,7 @@ export default function VacancyEditor() {
         ))}
         {roleTemplates.length === 0 && <p style={{ color: "#666" }}>None yet.</p>}
       </ul>
-      <RoleTemplateForm orgId={activeOrgId} onCreated={reload} />
+      <RoleTemplateForm orgId={activeOrgId} facilities={facilities} onCreated={reload} />
 
       <h3 style={{ marginTop: 32, fontSize: 15 }}>Vacancies</h3>
       <ul style={{ listStyle: "none", padding: 0 }}>
@@ -132,13 +135,27 @@ export default function VacancyEditor() {
   );
 }
 
-function RoleTemplateForm({ orgId, onCreated }: { orgId: string; onCreated: () => Promise<void> }) {
+function RoleTemplateForm({
+  orgId,
+  facilities,
+  onCreated,
+}: {
+  orgId: string;
+  facilities: Facility[];
+  onCreated: () => Promise<void>;
+}) {
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
   const [evaluatorIndex, setEvaluatorIndex] = useState(0);
   const [paramValue, setParamValue] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const currentEvaluator = EVALUATOR_OPTIONS[evaluatorIndex];
+
+  function selectEvaluator(index: number) {
+    setEvaluatorIndex(index);
+    setParamValue(EVALUATOR_OPTIONS[index].paramDefault ?? "");
+  }
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
@@ -190,20 +207,31 @@ function RoleTemplateForm({ orgId, onCreated }: { orgId: string; onCreated: () =
       </p>
       <input placeholder="Code (e.g. ED_SENIOR)" value={code} onChange={(e) => setCode(e.target.value)} required style={{ padding: 6 }} />
       <input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} required style={{ padding: 6 }} />
-      <select value={evaluatorIndex} onChange={(e) => setEvaluatorIndex(Number(e.target.value))} style={{ padding: 6 }}>
+      <select value={evaluatorIndex} onChange={(e) => selectEvaluator(Number(e.target.value))} style={{ padding: 6 }}>
         {EVALUATOR_OPTIONS.map((opt, i) => (
-          <option key={opt.value} value={i}>
+          <option key={`${opt.value}-${opt.type}`} value={i}>
             {opt.label}
           </option>
         ))}
       </select>
-      <input
-        placeholder={EVALUATOR_OPTIONS[evaluatorIndex].paramLabel}
-        value={paramValue}
-        onChange={(e) => setParamValue(e.target.value)}
-        required
-        style={{ padding: 6 }}
-      />
+      {currentEvaluator.paramKey === "facilityId" ? (
+        <select value={paramValue} onChange={(e) => setParamValue(e.target.value)} required style={{ padding: 6 }}>
+          <option value="">Select a facility…</option>
+          {facilities.map((f) => (
+            <option key={f.id} value={f.id}>
+              {f.name}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <input
+          placeholder={currentEvaluator.paramLabel}
+          value={paramValue}
+          onChange={(e) => setParamValue(e.target.value)}
+          required
+          style={{ padding: 6 }}
+        />
+      )}
       {error && <p style={{ color: "#a33", fontSize: 13, margin: 0 }}>{error}</p>}
       <button type="submit" disabled={submitting} style={{ padding: 8, alignSelf: "flex-start" }}>
         {submitting ? "Creating…" : "Create and publish"}

@@ -171,11 +171,81 @@ const availableForWindow: Evaluator = async (requirement, ctx) => {
   return { status: "PASS", explanation: "No declared unavailability overlaps this window" };
 };
 
+// AREA_OF_NEED — parameters: { facilityId }. docs/addendum/v0.3-addendum.md
+// §2: "Not practitioner-portable — facility/position-specific, never
+// inferred from a prior determination elsewhere." Same FAIL-not-UNKNOWN
+// shape as activeScopeAtFacility: an AreaOfNeedDetermination is always
+// organisation-issued and queryable, so "none covering this facility" is
+// a known fact, not missing data.
+const areaOfNeedCurrent: Evaluator = async (requirement, ctx) => {
+  const facilityId = getParam(requirement, "facilityId");
+  if (!facilityId) {
+    return { status: "UNKNOWN", explanation: "Requirement is missing facilityId parameter" };
+  }
+  const determinations = await ctx.prisma.areaOfNeedDetermination.findMany({
+    where: { practitionerId: ctx.practitionerId, status: "ACTIVE", facilityId },
+  });
+  const match = determinations.find((d) => {
+    const startsOk = !d.effectiveFrom || d.effectiveFrom <= ctx.asOf;
+    const endsOk = !d.effectiveTo || d.effectiveTo >= ctx.asOf;
+    return startsOk && endsOk;
+  });
+  if (match) {
+    return { status: "PASS", explanation: "Active Area of Need determination covers this facility" };
+  }
+  return {
+    status: "FAIL",
+    explanation: requirement.failureMessage ?? "No active Area of Need determination for this facility",
+  };
+};
+
+// MORATORIUM_LOCATION — parameters: { facilityId }. Independent of
+// ACTIVE_SCOPE (§2). Unlike AreaOfNeedDetermination, no MoratoriumStatus
+// row at all is a genuine UNKNOWN rather than a confident PASS or FAIL:
+// moratorium/DWS status is a Commonwealth determination (VEVO), not
+// something this organisation's own records can be authoritative about
+// simply by their absence — "never checked" must not be conflated with
+// "cleared." A row with restricted=true blocks every facility except the
+// one it's specifically recorded against (read as the practitioner's
+// documented DWS-area exception), and restricted=false clears them
+// outright. This reading is an interpretation of a genuinely ambiguous
+// spec passage — see docs/addendum/v0.3-addendum.md §2 — not a literal
+// field-by-field spec quote.
+const moratoriumLocationClear: Evaluator = async (requirement, ctx) => {
+  const facilityId = getParam(requirement, "facilityId");
+  if (!facilityId) {
+    return { status: "UNKNOWN", explanation: "Requirement is missing facilityId parameter" };
+  }
+  const statuses = await ctx.prisma.moratoriumStatus.findMany({ where: { practitionerId: ctx.practitionerId } });
+  const current = statuses.filter((s) => {
+    const startsOk = !s.effectiveFrom || s.effectiveFrom <= ctx.asOf;
+    const endsOk = !s.effectiveTo || s.effectiveTo >= ctx.asOf;
+    return startsOk && endsOk;
+  });
+  if (current.length === 0) {
+    return {
+      status: "UNKNOWN",
+      explanation: requirement.unknownMessage ?? "Moratorium/DWS status has not been determined for this practitioner",
+    };
+  }
+  const restricting = current.find((s) => s.restricted && s.facilityId !== facilityId);
+  if (restricting) {
+    return {
+      status: "FAIL",
+      explanation:
+        requirement.failureMessage ?? "Practitioner is subject to a moratorium/DWS restriction that does not cover this facility",
+    };
+  }
+  return { status: "PASS", explanation: "No moratorium/DWS restriction blocks this facility" };
+};
+
 export const EVALUATORS: Record<string, Evaluator> = {
   activeScopeAtFacility,
   registrationCurrent: credentialCurrent,
   credentialCurrent,
   availableForWindow,
+  areaOfNeedCurrent,
+  moratoriumLocationClear,
 };
 
 export async function runEvaluator(

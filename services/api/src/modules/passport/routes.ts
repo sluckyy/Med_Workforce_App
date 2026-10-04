@@ -27,12 +27,19 @@ const updateProfileBody = z
   })
   .refine((body) => Object.keys(body).length > 0, { message: "No fields to update" });
 
+// registrationType (docs/addendum/v0.3-addendum.md §2) feeds
+// ScopeGrant.supervision_level meaningfully for the IMG/provisional-
+// registration cohort — a plain, optional field on the claim itself,
+// same as issuer/referenceNumber.
+const REGISTRATION_TYPES = ["GENERAL", "PROVISIONAL", "LIMITED", "SUPERVISED_PRACTICE"] as const;
+
 const declareCredentialBody = z.object({
   definitionCode: z.string().min(1),
   issuer: z.string().min(1).optional(),
   referenceNumber: z.string().min(1).optional(),
   issueDate: z.coerce.date().optional(),
   expiryDate: z.coerce.date().optional(),
+  registrationType: z.enum(REGISTRATION_TYPES).optional(),
   attributes: z.record(z.unknown()).optional(),
 });
 
@@ -42,6 +49,7 @@ const updateCredentialBody = z
     referenceNumber: z.string().min(1).optional(),
     issueDate: z.coerce.date().optional(),
     expiryDate: z.coerce.date().optional(),
+    registrationType: z.enum(REGISTRATION_TYPES).optional(),
     attributes: z.record(z.unknown()).optional(),
   })
   .refine((body) => Object.keys(body).length > 0, { message: "No fields to update" });
@@ -243,6 +251,7 @@ export function registerPassportRoutes(app: FastifyInstance) {
           referenceNumber: rest.referenceNumber,
           issueDate: rest.issueDate,
           expiryDate: rest.expiryDate,
+          registrationType: rest.registrationType,
           attributesJson: rest.attributes as Prisma.InputJsonValue | undefined,
           status: CredentialStatus.DECLARED,
           createdBy: request.authUser!.id,
