@@ -9,6 +9,7 @@ import { registerScopeModule } from "./modules/scope/index.js";
 import { registerEligibilityModule } from "./modules/eligibility/index.js";
 import { registerAssuranceModule } from "./modules/assurance/index.js";
 import { registerExchangeModule } from "./modules/exchange/index.js";
+import { registerCommercialModule } from "./modules/commercial/index.js";
 
 export function buildApp() {
   const app = Fastify({ logger: true });
@@ -24,6 +25,7 @@ export function buildApp() {
   registerEligibilityModule(app);
   registerAssuranceModule(app);
   registerExchangeModule(app);
+  registerCommercialModule(app);
 
   app.get("/health", async () => ({ status: "ok" }));
 

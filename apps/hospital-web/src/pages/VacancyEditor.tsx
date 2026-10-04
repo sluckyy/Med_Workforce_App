@@ -119,6 +119,9 @@ export default function VacancyEditor() {
               <Link to={`/candidates?vacancyId=${v.id}`} style={{ fontSize: 13, alignSelf: "center" }}>
                 View candidates →
               </Link>
+              <Link to={`/agency-proposals?vacancyId=${v.id}`} style={{ fontSize: 13, alignSelf: "center" }}>
+                Agency proposals →
+              </Link>
             </div>
           </li>
         ))}

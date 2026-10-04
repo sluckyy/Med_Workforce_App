@@ -20,10 +20,16 @@
  * stateless /evaluate endpoint was missing — see its module doc), staff
  * selects an ELIGIBLE candidate (never any other status — enforced, not
  * just conventional) which creates a Booking, and the practitioner
- * confirms it. No SourcingPolicy/SourcingRun/Agency workflow (that's
- * modules/commercial's territory) and no Placement (the addendum's
- * non-contiguous block-booking aggregate) — both left as gaps rather than
- * half-built.
+ * confirms it. Selecting an AGENCY-sourced candidate also snapshots that
+ * agency's current commercial terms onto the Booking and marks its
+ * AgencyProposal ACCEPTED (modules/commercial owns the proposal/agreement
+ * rows; this is the one moment this module reaches into them, since the
+ * engagement — and so the snapshot — happens here). A selection can
+ * optionally link the resulting Booking to an existing Placement (the
+ * addendum's non-contiguous block-booking aggregate; Placement CRUD
+ * itself lives in modules/commercial). No SourcingPolicy/SourcingRun
+ * staged-audience cascade (direct vs. panel-agency-first timing) — left
+ * as a gap, documented in modules/commercial's doc comment.
  */
 import type { FastifyInstance } from "fastify";
 import { registerExchangeRoutes } from "./routes.js";
