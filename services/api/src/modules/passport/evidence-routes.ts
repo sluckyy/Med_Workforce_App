@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { prisma } from "../../prisma.js";
 import { recordAuditEvent } from "../audit/index.js";
-import { buildObjectKey, deleteEvidence, getEvidenceDownloadUrl, uploadEvidence } from "./storage.js";
+import { buildObjectKey, deleteEvidence, downloadEvidence, getEvidenceDownloadUrl, uploadEvidence } from "./storage.js";
+import { scanBuffer } from "./scan.js";
 
 const MAX_EVIDENCE_BYTES = 15 * 1024 * 1024;
 const ALLOWED_MIME_TYPES = new Set(["application/pdf", "image/png", "image/jpeg"]);
@@ -79,15 +80,47 @@ export function registerEvidenceRoutes(app: FastifyInstance) {
         throw err;
       }
 
-      const objectKey = buildObjectKey(credential.practitionerId, credential.id, file.filename);
-      await uploadEvidence(objectKey, buffer, file.mimetype);
       const sha256 = createHash("sha256").update(buffer).digest("hex");
 
-      // scanStatus is left at its default (PENDING) — no malware/AV
-      // scanning pipeline exists yet, so nothing here ever promotes it to
-      // CLEAN. A documented gap (see modules/passport/index.ts), not a
-      // silent one: assurance staff reviewing evidence can see PENDING and
-      // should treat an unscanned file with appropriate caution.
+      // Scanned BEFORE anything is written to blob storage, so an
+      // infected upload never reaches it. CLEAN and PENDING (scanner
+      // unreachable — never conflated with CLEAN, see scan.ts) both
+      // proceed to storage; only a positive detection is blocked.
+      const scan = await scanBuffer(buffer);
+      if (scan.status === "QUARANTINED") {
+        // Recorded with no objectKey — the bytes themselves are never
+        // persisted, but there's still an audit trail that someone tried
+        // to upload this and what matched, in case the same signature
+        // keeps recurring for one practitioner.
+        const evidence = await prisma.credentialEvidence.create({
+          data: {
+            credentialId: credential.id,
+            sourceType: "UPLOAD",
+            originalFilename: file.filename,
+            mimeType: file.mimetype,
+            sizeBytes: buffer.length,
+            sha256,
+            scanStatus: "QUARANTINED",
+            createdBy: request.authUser.id,
+          },
+        });
+
+        await recordAuditEvent(prisma, {
+          eventType: "passport.evidence.quarantined",
+          actorId: request.authUser.id,
+          resourceType: "CredentialEvidence",
+          resourceId: evidence.id,
+          outcome: "failure",
+          metadata: { credentialId: credential.id, signature: scan.signature },
+        });
+
+        reply.code(422).send({ error: `File rejected by malware scanning: ${scan.signature}` });
+        return;
+      }
+
+      const objectKey = buildObjectKey(credential.practitionerId, credential.id, file.filename);
+      await uploadEvidence(objectKey, buffer, file.mimetype);
+
       const evidence = await prisma.credentialEvidence.create({
         data: {
           credentialId: credential.id,
@@ -97,6 +130,7 @@ export function registerEvidenceRoutes(app: FastifyInstance) {
           mimeType: file.mimetype,
           sizeBytes: buffer.length,
           sha256,
+          scanStatus: scan.status,
           createdBy: request.authUser.id,
         },
       });
@@ -154,6 +188,63 @@ export function registerEvidenceRoutes(app: FastifyInstance) {
       });
 
       reply.send({ url, expiresInSeconds: DOWNLOAD_URL_TTL_SECONDS });
+    },
+  );
+
+  // Re-scans evidence stuck at PENDING (the scanner was unreachable at
+  // upload time — see scan.ts) without needing the practitioner to
+  // re-upload. Staff-only: this is an assurance remediation action, not a
+  // routine one, same framing as the rest of modules/assurance.
+  app.post(
+    "/v1/passport/credentials/:id/evidence/:evidenceId/rescan",
+    { preHandler: [app.authenticate, app.requireOrgRole("CREDENTIAL_OFFICER")] },
+    async (request, reply) => {
+      const { id, evidenceId } = request.params as { id: string; evidenceId: string };
+
+      const evidence = await prisma.credentialEvidence.findUnique({ where: { id: evidenceId } });
+      if (!evidence || evidence.credentialId !== id || !evidence.objectKey) {
+        reply.code(404).send({ error: "Not found" });
+        return;
+      }
+
+      const buffer = await downloadEvidence(evidence.objectKey);
+      const scan = await scanBuffer(buffer);
+
+      if (scan.status === "QUARANTINED") {
+        await deleteEvidence(evidence.objectKey);
+        await prisma.credentialEvidence.update({
+          where: { id: evidenceId },
+          data: { objectKey: null, scanStatus: "QUARANTINED" },
+        });
+
+        await recordAuditEvent(prisma, {
+          eventType: "passport.evidence.quarantined",
+          actorId: request.authUser!.id,
+          resourceType: "CredentialEvidence",
+          resourceId: evidenceId,
+          outcome: "failure",
+          metadata: { credentialId: id, signature: scan.signature, viaRescan: true },
+        });
+
+        reply.send(serializeEvidence({ ...evidence, scanStatus: "QUARANTINED" }));
+        return;
+      }
+
+      const updated = await prisma.credentialEvidence.update({
+        where: { id: evidenceId },
+        data: { scanStatus: scan.status },
+      });
+
+      await recordAuditEvent(prisma, {
+        eventType: "passport.evidence.rescan",
+        actorId: request.authUser!.id,
+        resourceType: "CredentialEvidence",
+        resourceId: evidenceId,
+        outcome: "success",
+        metadata: { credentialId: id, result: scan.status },
+      });
+
+      reply.send(serializeEvidence(updated));
     },
   );
 
