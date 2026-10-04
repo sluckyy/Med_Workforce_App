@@ -28,6 +28,7 @@ export default function CandidateComparison() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [placementId, setPlacementId] = useState("");
 
   const reload = useCallback(async () => {
     if (!activeOrgId || !vacancyId) return;
@@ -67,6 +68,7 @@ export default function CandidateComparison() {
     try {
       await apiFetch(`/v1/organisations/${activeOrgId}/vacancies/${vacancyId}/candidates/${candidateId}/select`, {
         method: "POST",
+        body: JSON.stringify({ placementId: placementId || undefined }),
       });
       await reload();
     } catch (err) {
@@ -84,6 +86,15 @@ export default function CandidateComparison() {
   return (
     <section>
       <h2>Candidate comparison</h2>
+      <label style={{ fontSize: 12, display: "block", marginBottom: 12, maxWidth: 420 }}>
+        Link the resulting booking to a placement (optional — see the Placements page)
+        <input
+          placeholder="Placement ID"
+          value={placementId}
+          onChange={(e) => setPlacementId(e.target.value)}
+          style={{ display: "block", padding: 6, width: "100%", marginTop: 4 }}
+        />
+      </label>
       {error && <p style={{ color: "#a33" }}>{error}</p>}
       <ul style={{ listStyle: "none", padding: 0 }}>
         {candidates.map((c) => (

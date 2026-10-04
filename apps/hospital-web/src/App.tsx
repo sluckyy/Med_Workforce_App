@@ -8,14 +8,22 @@ import ScopeView from "./pages/ScopeView.js";
 import AssuranceQueue from "./pages/AssuranceQueue.js";
 import ExperienceDashboard from "./pages/ExperienceDashboard.js";
 import Security from "./pages/Security.js";
+import Agencies from "./pages/Agencies.js";
+import AgencyPortal from "./pages/AgencyPortal.js";
+import AgencyProposals from "./pages/AgencyProposals.js";
+import Placements from "./pages/Placements.js";
 
 const nav = [
   { to: "/", label: "Dashboard", end: true },
   { to: "/vacancy-editor", label: "Vacancy editor" },
   { to: "/candidates", label: "Candidate comparison" },
+  { to: "/agency-proposals", label: "Agency proposals" },
   { to: "/scope", label: "Credential / scope view" },
   { to: "/assurance", label: "Assurance queue" },
   { to: "/experience", label: "Experience dashboard" },
+  { to: "/agencies", label: "Agency panel" },
+  { to: "/agency-portal", label: "Agency portal" },
+  { to: "/placements", label: "Placements" },
   { to: "/security", label: "Security" },
 ];
 
@@ -76,6 +84,10 @@ function Shell() {
             <Route path="/scope" element={<ScopeView />} />
             <Route path="/assurance" element={<AssuranceQueue />} />
             <Route path="/experience" element={<ExperienceDashboard />} />
+            <Route path="/agencies" element={<Agencies />} />
+            <Route path="/agency-portal" element={<AgencyPortal />} />
+            <Route path="/agency-proposals" element={<AgencyProposals />} />
+            <Route path="/placements" element={<Placements />} />
             <Route path="/security" element={<Security />} />
           </Routes>
         )}

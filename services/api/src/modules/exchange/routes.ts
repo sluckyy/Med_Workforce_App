@@ -1,9 +1,10 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { CandidateStatus, VacancyStatus, BookingStatus, CandidateSourceType } from "@prisma/client";
+import { Prisma, CandidateStatus, VacancyStatus, BookingStatus, CandidateSourceType, AgencyProposalStatus } from "@prisma/client";
 import { prisma } from "../../prisma.js";
 import { recordAuditEvent } from "../audit/index.js";
 import { evaluateRequirementSet } from "../eligibility/evaluators.js";
+import { findActiveAgreement } from "../commercial/agreements.js";
 
 // Matches the spec's Medical Workforce persona: "Vacancies, sourcing,
 // candidate review, booking" (§3). Read access is a bit broader (shared
@@ -11,6 +12,14 @@ import { evaluateRequirementSet } from "../eligibility/evaluators.js";
 // need visibility into what a candidate is being assessed against.
 const WORKFORCE_ROLE = "MEDICAL_WORKFORCE" as const;
 const READ_ROLES = ["MEDICAL_WORKFORCE", "CREDENTIAL_OFFICER", "SCOPE_APPROVER"] as const;
+
+const selectCandidateBody = z.object({
+  // Links the resulting Booking to an existing Placement (v0.3 addendum
+  // §3 — the aggregate above Booking for non-contiguous block/on-call
+  // engagements), e.g. one leg of a "1 week per month for 6 months" rural
+  // generalist arrangement. Optional — most bookings aren't part of one.
+  placementId: z.string().uuid().optional(),
+});
 
 const createVacancyBody = z.object({
   roleTemplateId: z.string().uuid(),
@@ -383,19 +392,57 @@ export function registerExchangeRoutes(app: FastifyInstance) {
         return;
       }
 
-      const [, , booking] = await prisma.$transaction([
-        prisma.candidate.update({ where: { id: candidateId }, data: { status: CandidateStatus.SELECTED } }),
-        prisma.vacancy.update({ where: { id }, data: { status: VacancyStatus.CANDIDATE_SELECTED } }),
-        prisma.booking.create({
+      const bodyParsed = selectCandidateBody.safeParse(request.body ?? {});
+      if (!bodyParsed.success) {
+        reply.code(400).send({ error: "Invalid request", details: bodyParsed.error.flatten() });
+        return;
+      }
+      const { placementId } = bodyParsed.data;
+      if (placementId) {
+        const placement = await prisma.placement.findUnique({ where: { id: placementId } });
+        if (!placement || placement.organisationId !== organisationId || placement.practitionerId !== candidate.practitionerId) {
+          reply.code(400).send({ error: "Unknown placement for this organisation and practitioner" });
+          return;
+        }
+      }
+
+      const booking = await prisma.$transaction(async (tx) => {
+        await tx.candidate.update({ where: { id: candidateId }, data: { status: CandidateStatus.SELECTED } });
+        await tx.vacancy.update({ where: { id }, data: { status: VacancyStatus.CANDIDATE_SELECTED } });
+
+        // The engagement is happening right now — this is the one moment
+        // the spec requires commercial terms to be frozen onto the
+        // booking (never a live reference to the agency's current
+        // agreement, which could change later). See modules/commercial's
+        // doc comment.
+        let commercialSnapshot: Prisma.InputJsonValue | undefined;
+        if (candidate.sourceType === CandidateSourceType.AGENCY) {
+          const proposal = await tx.agencyProposal.findUnique({ where: { candidateId: candidate.id } });
+          if (proposal && proposal.status === AgencyProposalStatus.SUBMITTED) {
+            const agreement = await findActiveAgreement(tx, proposal.agencyId, new Date());
+            commercialSnapshot = {
+              agencyId: proposal.agencyId,
+              agreementId: agreement?.id ?? null,
+              feeModel: agreement?.feeModel ?? null,
+              terms: (agreement?.termsJson as Prisma.InputJsonValue | null) ?? null,
+              snapshottedAt: new Date().toISOString(),
+            };
+            await tx.agencyProposal.update({ where: { id: proposal.id }, data: { status: AgencyProposalStatus.ACCEPTED } });
+          }
+        }
+
+        return tx.booking.create({
           data: {
             vacancyId: id,
             practitionerId: candidate.practitionerId,
             sourceType: candidate.sourceType,
             status: BookingStatus.PENDING_CONFIRMATION,
             eligibilityAssessmentId: latestAssessment.id,
+            commercialSnapshotJson: commercialSnapshot,
+            placementId,
           },
-        }),
-      ]);
+        });
+      });
 
       await recordAuditEvent(prisma, {
         eventType: "exchange.candidate.select",

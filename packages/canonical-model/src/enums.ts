@@ -114,3 +114,63 @@ export const UserStatus = {
   LOCKED: "LOCKED",
 } as const;
 export type UserStatus = (typeof UserStatus)[keyof typeof UserStatus];
+
+export const CandidateSourceType = {
+  AGENCY: "AGENCY",
+  DIRECT: "DIRECT",
+  INTERNAL: "INTERNAL",
+} as const;
+export type CandidateSourceType = (typeof CandidateSourceType)[keyof typeof CandidateSourceType];
+
+export const CandidateStatus = {
+  DISCOVERED: "DISCOVERED",
+  NOTIFIED: "NOTIFIED",
+  INTERESTED: "INTERESTED",
+  APPLIED: "APPLIED",
+  AGENCY_PROPOSED: "AGENCY_PROPOSED",
+  ELIGIBILITY_PENDING: "ELIGIBILITY_PENDING",
+  ELIGIBLE: "ELIGIBLE",
+  INELIGIBLE: "INELIGIBLE",
+  SELECTED: "SELECTED",
+  DECLINED: "DECLINED",
+  WITHDRAWN: "WITHDRAWN",
+} as const;
+export type CandidateStatus = (typeof CandidateStatus)[keyof typeof CandidateStatus];
+
+export const BookingStatus = {
+  PENDING_CONFIRMATION: "PENDING_CONFIRMATION",
+  CONFIRMED: "CONFIRMED",
+  CANCELLED_BY_DOCTOR: "CANCELLED_BY_DOCTOR",
+  CANCELLED_BY_SERVICE: "CANCELLED_BY_SERVICE",
+  REPLACED: "REPLACED",
+  WORKED: "WORKED",
+  NO_SHOW: "NO_SHOW",
+  CLOSED: "CLOSED",
+} as const;
+export type BookingStatus = (typeof BookingStatus)[keyof typeof BookingStatus];
+
+// Agency & Commercial (docs/spec/01-technical-architecture-data-model-v0.2.docx
+// §19, §25).
+export const PanelStatus = {
+  ELIGIBLE: "ELIGIBLE",
+  SUSPENDED: "SUSPENDED",
+  EXPIRED: "EXPIRED",
+  INELIGIBLE: "INELIGIBLE",
+} as const;
+export type PanelStatus = (typeof PanelStatus)[keyof typeof PanelStatus];
+
+export const FeeModel = {
+  PERCENT: "PERCENT",
+  FIXED: "FIXED",
+  MARKUP: "MARKUP",
+  OTHER: "OTHER",
+} as const;
+export type FeeModel = (typeof FeeModel)[keyof typeof FeeModel];
+
+export const AgencyProposalStatus = {
+  SUBMITTED: "SUBMITTED",
+  WITHDRAWN: "WITHDRAWN",
+  ACCEPTED: "ACCEPTED",
+  DECLINED: "DECLINED",
+} as const;
+export type AgencyProposalStatus = (typeof AgencyProposalStatus)[keyof typeof AgencyProposalStatus];
