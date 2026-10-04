@@ -12,6 +12,7 @@ import Timesheet from "./pages/Timesheet.js";
 import Experience from "./pages/Experience.js";
 import Security from "./pages/Security.js";
 import ApprovalPage from "./pages/ApprovalPage.js";
+import ShareView from "./pages/ShareView.js";
 
 const nav = [
   { to: "/", label: "Home", end: true },
@@ -36,15 +37,15 @@ export default function App() {
 function Shell() {
   const { user, loading, logout } = useAuth();
   const location = useLocation();
-  // The external timesheet approver never has a platform account at all
-  // (docs/spec/01-technical-architecture-data-model-v0.2.docx §24, §33) —
-  // this one path has to work with no login, so it's carved out of the
-  // auth gate below rather than living inside the authenticated Routes.
-  const isPublicApproval = location.pathname.startsWith("/approve/");
+  // Neither the external timesheet approver (§24, §33) nor a credential
+  // share recipient (§21) ever has a platform account — both paths have
+  // to work with no login, so they're carved out of the auth gate below
+  // rather than living inside the authenticated Routes.
+  const isPublicRoute = location.pathname.startsWith("/approve/") || location.pathname.startsWith("/shares/");
 
   return (
     <div style={{ fontFamily: "system-ui, sans-serif", maxWidth: 720, margin: "0 auto", padding: 16 }}>
-      {!isPublicApproval && (
+      {!isPublicRoute && (
         <header style={{ marginBottom: 24 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
             <h1 style={{ fontSize: 20 }}>Medical Workforce Passport — Doctor</h1>
@@ -78,9 +79,10 @@ function Shell() {
         </header>
       )}
       <main>
-        {isPublicApproval ? (
+        {isPublicRoute ? (
           <Routes>
             <Route path="/approve/:token" element={<ApprovalPage />} />
+            <Route path="/shares/:token" element={<ShareView />} />
           </Routes>
         ) : loading ? (
           <p>Loading…</p>

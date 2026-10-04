@@ -1074,6 +1074,10 @@ model CredentialShare {
   recipientContact String?
   tokenHash        String
   otpRequired      Boolean      @default(false)
+  // bcrypt hash of the OTP code shown to the doctor exactly once at
+  // creation — never stored in plaintext, mirroring the backup-code and
+  // approval-token "shown once" pattern used elsewhere.
+  otpCodeHash      String?
   expiresAt        DateTime
   status           ShareStatus  @default(ACTIVE)
   createdAt        DateTime     @default(now())
