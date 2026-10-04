@@ -40,6 +40,8 @@ function serializeCredentialForStaff(
       id: e.id,
       sourceType: e.sourceType,
       originalFilename: e.originalFilename,
+      mimeType: e.mimeType,
+      sizeBytes: e.sizeBytes,
       scanStatus: e.scanStatus,
       sensitivity: e.sensitivity,
       createdAt: e.createdAt,

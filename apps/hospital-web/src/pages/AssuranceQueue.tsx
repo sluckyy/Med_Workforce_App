@@ -21,7 +21,7 @@ interface CredentialDetail {
   expiryDate: string | null;
   definition: { code: string; name: string; category: string };
   practitioner: { id: string; displayName: string; email: string };
-  evidence: Array<{ id: string; sourceType: string; originalFilename: string | null; scanStatus: string }>;
+  evidence: Array<{ id: string; sourceType: string; originalFilename: string | null; scanStatus: string; mimeType: string | null }>;
   verifications: Array<{ id: string; method: string; result: string; verifiedAt: string; notes: string | null }>;
 }
 
@@ -173,6 +173,14 @@ function VerifyForm({
         </tbody>
       </table>
 
+      <h3 style={{ fontSize: 14 }}>Evidence</h3>
+      <ul style={{ fontSize: 13 }}>
+        {credential.evidence.map((e) => (
+          <EvidenceDownloadRow key={e.id} credentialId={credential.id} evidence={e} />
+        ))}
+        {credential.evidence.length === 0 && <li style={{ listStyle: "none", color: "#666" }}>No evidence attached.</li>}
+      </ul>
+
       <h3 style={{ fontSize: 14 }}>Verification history</h3>
       <ul style={{ fontSize: 13 }}>
         {credential.verifications.map((v) => (
@@ -221,5 +229,47 @@ function VerifyForm({
         </button>
       </form>
     </section>
+  );
+}
+
+function EvidenceDownloadRow({
+  credentialId,
+  evidence,
+}: {
+  credentialId: string;
+  evidence: { id: string; sourceType: string; originalFilename: string | null; scanStatus: string; mimeType: string | null };
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function onDownload() {
+    setError(null);
+    setBusy(true);
+    try {
+      const { url } = await apiFetch<{ url: string }>(
+        `/v1/passport/credentials/${credentialId}/evidence/${evidence.id}/download`,
+      );
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not get a download link.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <li>
+      {evidence.sourceType} · {evidence.originalFilename ?? "(no file)"} · {evidence.scanStatus}
+      {" · "}
+      <button
+        type="button"
+        disabled={busy}
+        onClick={onDownload}
+        style={{ background: "none", border: "none", textDecoration: "underline", cursor: "pointer", padding: 0, fontSize: 13 }}
+      >
+        Download
+      </button>
+      {error && <span style={{ color: "#a33", marginLeft: 8 }}>{error}</span>}
+    </li>
   );
 }
