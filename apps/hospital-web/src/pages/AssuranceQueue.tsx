@@ -241,6 +241,7 @@ function EvidenceDownloadRow({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [scanStatus, setScanStatus] = useState(evidence.scanStatus);
 
   async function onDownload() {
     setError(null);
@@ -257,18 +258,50 @@ function EvidenceDownloadRow({
     }
   }
 
+  async function onRescan() {
+    setError(null);
+    setBusy(true);
+    try {
+      const result = await apiFetch<{ scanStatus: string }>(
+        `/v1/passport/credentials/${credentialId}/evidence/${evidence.id}/rescan`,
+        { method: "POST" },
+      );
+      setScanStatus(result.scanStatus);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not rescan this file.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <li>
-      {evidence.sourceType} · {evidence.originalFilename ?? "(no file)"} · {evidence.scanStatus}
+      {evidence.sourceType} · {evidence.originalFilename ?? "(no file)"} ·{" "}
+      <span style={{ color: scanStatus === "QUARANTINED" ? "#a33" : scanStatus === "PENDING" ? "#a67c00" : "#0a7a2f", fontWeight: 600 }}>
+        {scanStatus}
+      </span>
       {" · "}
       <button
         type="button"
-        disabled={busy}
+        disabled={busy || scanStatus === "QUARANTINED"}
         onClick={onDownload}
         style={{ background: "none", border: "none", textDecoration: "underline", cursor: "pointer", padding: 0, fontSize: 13 }}
       >
         Download
       </button>
+      {scanStatus === "PENDING" && (
+        <>
+          {" · "}
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onRescan}
+            style={{ background: "none", border: "none", textDecoration: "underline", cursor: "pointer", padding: 0, fontSize: 13 }}
+          >
+            Rescan
+          </button>
+        </>
+      )}
       {error && <span style={{ color: "#a33", marginLeft: 8 }}>{error}</span>}
     </li>
   );

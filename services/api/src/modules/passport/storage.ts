@@ -58,6 +58,15 @@ export async function getEvidenceDownloadUrl(objectKey: string): Promise<string>
   });
 }
 
+// Used only by the rescan endpoint (modules/passport/evidence-routes.ts) —
+// nothing else needs the raw bytes back once a file is uploaded; routine
+// access goes through the short-lived SAS URL above instead.
+export async function downloadEvidence(objectKey: string): Promise<Buffer> {
+  const containerClient = await getContainerClient();
+  const blockBlobClient = containerClient.getBlockBlobClient(objectKey);
+  return blockBlobClient.downloadToBuffer();
+}
+
 export async function deleteEvidence(objectKey: string): Promise<void> {
   const containerClient = await getContainerClient();
   await containerClient.getBlockBlobClient(objectKey).deleteIfExists();

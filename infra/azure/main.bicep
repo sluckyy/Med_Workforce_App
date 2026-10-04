@@ -252,9 +252,14 @@ resource apiApp 'Microsoft.App/containerApps@2024-03-01' = {
           name: 'api'
           image: apiImage
           env: apiEnv
+          // Bumped from 0.5 vCPU / 1Gi for the ClamAV daemon this
+          // container now also runs (services/api/docker/{clamd.conf,
+          // start.sh}) — clamd alone holds its signature database at
+          // ~1GB RSS once loaded, which didn't fit in the old allowance
+          // alongside Node.
           resources: {
-            cpu: json('0.5')
-            memory: '1Gi'
+            cpu: json('1.0')
+            memory: '2Gi'
           }
           probes: usePlaceholderImages ? [] : [
             {

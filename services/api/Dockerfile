@@ -18,7 +18,10 @@ RUN npm run prisma:generate --workspace services/api
 RUN npm run build --workspace services/api
 
 FROM node:20-alpine
-RUN apk add --no-cache openssl
+# clamav pulls in clamd (clamav-daemon), clamscan/sigtool
+# (clamav-scanner) and freshclam transitively — listed explicitly anyway
+# since start.sh depends directly on all three being present.
+RUN apk add --no-cache openssl clamav freshclam
 WORKDIR /app
 # npm workspaces hoist most dependencies to the repo root, so the runtime
 # image needs that whole tree. This also keeps the `prisma` CLI binary
@@ -33,8 +36,20 @@ COPY --from=build /repo/services/api/node_modules ./node_modules
 COPY --from=build /repo/services/api/dist ./dist
 COPY --from=build /repo/services/api/prisma ./prisma
 COPY --from=build /repo/services/api/package.json ./package.json
+COPY services/api/docker/clamd.conf /etc/clamav/clamd.conf
+COPY services/api/docker/freshclam.conf /etc/clamav/freshclam.conf
+COPY services/api/docker/start.sh ./start.sh
+RUN chmod +x ./start.sh && mkdir -p /var/lib/clamav /run/clamav \
+  # Bakes a signature database into the image so clamd never blocks
+  # startup on a cold download; `|| true` because a build-time network
+  # hiccup against the mirror shouldn't fail the whole image build — the
+  # container-start freshclam (see start.sh) gets another attempt, and
+  # clamd degrades to "unavailable" (modules/passport/scan.ts), not a
+  # crash loop, if no database is present at all.
+  && (freshclam --config-file=/etc/clamav/freshclam.conf || true)
 EXPOSE 8000
-# Applies any pending migration before the app starts, so a fresh
-# environment (e.g. first Azure deployment) comes up with a real schema
-# rather than requiring a manual migration step.
-CMD ["sh", "-c", "npx prisma migrate deploy --schema prisma/schema.prisma && node dist/server.js"]
+# Migration + AV daemon startup now needs more than a one-line CMD — see
+# start.sh. clamd and freshclam run as background children of this
+# script; the final `exec node` replaces the script's own process image
+# (so Node becomes PID 1) without killing those already-started children.
+CMD ["./start.sh"]

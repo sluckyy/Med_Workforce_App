@@ -19,9 +19,22 @@
  * GET .../evidence/:evidenceId/download (short-lived SAS URL — the browser
  * fetches the file directly from Blob Storage), DELETE (only while the
  * credential is still DECLARED and the evidence hasn't been used in a
- * Verification yet). No malware scanning pipeline exists, so
- * CredentialEvidence.scanStatus never leaves PENDING — a documented gap,
- * not a silent one.
+ * Verification yet).
+ *
+ * Every upload is scanned by a real ClamAV daemon (modules/passport/scan.ts
+ * talks to clamd over its local unix socket via the INSTREAM protocol;
+ * clamd itself runs as a background process in this same container — see
+ * services/api/docker/{clamd.conf,freshclam.conf,start.sh}) BEFORE the
+ * bytes ever reach Blob Storage. A positive detection is rejected outright
+ * (HTTP 422) and recorded with no objectKey — the file itself is never
+ * persisted, only the fact that someone tried to upload it. A clean file
+ * is CredentialEvidence.scanStatus CLEAN; if clamd is unreachable (a cold
+ * start, or an outage) the upload still proceeds but stays PENDING — never
+ * silently promoted to CLEAN on a check that didn't actually happen, same
+ * invariant this codebase applies everywhere else (eligibility evaluators,
+ * fatigue checks, moratorium status). CREDENTIAL_OFFICER staff can retry a
+ * PENDING evidence item once the scanner is back via POST
+ * .../evidence/:evidenceId/rescan.
  */
 import type { FastifyInstance } from "fastify";
 import { registerPassportRoutes } from "./routes.js";
