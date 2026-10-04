@@ -239,6 +239,60 @@ const moratoriumLocationClear: Evaluator = async (requirement, ctx) => {
   return { status: "PASS", explanation: "No moratorium/DWS restriction blocks this facility" };
 };
 
+// FATIGUE — parameters: { ruleCode }. docs/addendum/v0.3-addendum.md §1:
+// "MVP scope: hard gate only on what the platform can know for certain
+// (its own double-bookings for one practitioner). Anything relying on
+// self-declaration produces INDETERMINATE... never silently blocked and
+// never silently passed." A PLATFORM_BOOKING WorkEpisode (created when a
+// booking is confirmed — see modules/exchange) that overlaps the window
+// is a fact this platform itself is authoritative about, so it's a hard
+// FAIL; a SELF_DECLARED episode (lower assurance by definition) can only
+// ever push the result to UNKNOWN, never to a confident FAIL or PASS on
+// its own. FatigueRule.parametersJson's rolling-hours/inter-shift-break
+// thresholds are stored and versioned but not yet interpreted here — only
+// direct time-window overlap is checked, a documented simplification
+// (see modules/fatigue/index.ts), not a silent one.
+const fatigueCheck: Evaluator = async (requirement, ctx) => {
+  if (!ctx.window) {
+    return { status: "UNKNOWN", explanation: "No date window supplied to evaluate fatigue exposure against" };
+  }
+  const ruleCode = getParam(requirement, "ruleCode");
+  if (!ruleCode) {
+    return { status: "UNKNOWN", explanation: "Requirement is missing ruleCode parameter" };
+  }
+  const rule = await ctx.prisma.fatigueRule.findUnique({ where: { code: ruleCode } });
+  if (!rule || rule.status !== "PUBLISHED") {
+    return { status: "UNKNOWN", explanation: `No published fatigue rule "${ruleCode}"` };
+  }
+
+  const episodes = await ctx.prisma.workEpisode.findMany({
+    where: {
+      practitionerId: ctx.practitionerId,
+      startAt: { lt: ctx.window.endAt },
+      endAt: { gt: ctx.window.startAt },
+    },
+  });
+
+  const platformConflict = episodes.find((e) => e.source === "PLATFORM_BOOKING");
+  if (platformConflict) {
+    return {
+      status: "FAIL",
+      explanation:
+        requirement.failureMessage ?? "Practitioner already has a confirmed platform booking that overlaps this window",
+    };
+  }
+  const selfDeclaredConflict = episodes.find((e) => e.source === "SELF_DECLARED");
+  if (selfDeclaredConflict) {
+    return {
+      status: "UNKNOWN",
+      explanation:
+        requirement.unknownMessage ??
+        "A self-declared external engagement overlaps this window — lower assurance, cannot confirm no conflict",
+    };
+  }
+  return { status: "PASS", explanation: "No known overlapping work episode for this window" };
+};
+
 export const EVALUATORS: Record<string, Evaluator> = {
   activeScopeAtFacility,
   registrationCurrent: credentialCurrent,
@@ -246,6 +300,7 @@ export const EVALUATORS: Record<string, Evaluator> = {
   availableForWindow,
   areaOfNeedCurrent,
   moratoriumLocationClear,
+  fatigueCheck,
 };
 
 export async function runEvaluator(

@@ -14,6 +14,7 @@ import AgencyProposals from "./pages/AgencyProposals.js";
 import Placements from "./pages/Placements.js";
 import Timesheets from "./pages/Timesheets.js";
 import WorkforceAccess from "./pages/WorkforceAccess.js";
+import FatigueSafety from "./pages/FatigueSafety.js";
 
 const nav = [
   { to: "/", label: "Dashboard", end: true },
@@ -28,6 +29,7 @@ const nav = [
   { to: "/agency-portal", label: "Agency portal" },
   { to: "/placements", label: "Placements" },
   { to: "/workforce-access", label: "Workforce Access" },
+  { to: "/fatigue-safety", label: "Fatigue & Safety" },
   { to: "/security", label: "Security" },
 ];
 
@@ -94,6 +96,7 @@ function Shell() {
             <Route path="/agency-proposals" element={<AgencyProposals />} />
             <Route path="/placements" element={<Placements />} />
             <Route path="/workforce-access" element={<WorkforceAccess />} />
+            <Route path="/fatigue-safety" element={<FatigueSafety />} />
             <Route path="/security" element={<Security />} />
           </Routes>
         )}

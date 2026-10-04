@@ -483,7 +483,7 @@ export function registerExchangeRoutes(app: FastifyInstance) {
 
   app.post("/v1/bookings/:id/confirm", { preHandler: app.authenticate }, async (request, reply) => {
     const { id } = request.params as { id: string };
-    const booking = await prisma.booking.findUnique({ where: { id } });
+    const booking = await prisma.booking.findUnique({ where: { id }, include: { vacancy: true } });
     if (!booking || booking.practitionerId !== request.authUser?.practitionerId) {
       reply.code(404).send({ error: "Not found" });
       return;
@@ -499,6 +499,22 @@ export function registerExchangeRoutes(app: FastifyInstance) {
         data: { status: BookingStatus.CONFIRMED, confirmedAt: new Date() },
       }),
       prisma.vacancy.update({ where: { id: booking.vacancyId }, data: { status: VacancyStatus.BOOKED } }),
+      // A confirmed booking is an authoritative work episode: used by the
+      // fatigue evaluator to detect double-bookings. bookingId is unique,
+      // so a retried confirm can never create a duplicate episode.
+      prisma.workEpisode.upsert({
+        where: { bookingId: id },
+        create: {
+          practitionerId: booking.practitionerId,
+          facilityId: booking.vacancy.facilityId,
+          startAt: booking.vacancy.startAt,
+          endAt: booking.vacancy.endAt,
+          source: "PLATFORM_BOOKING",
+          assuranceLevel: "HIGH",
+          bookingId: id,
+        },
+        update: {},
+      }),
     ]);
 
     await recordAuditEvent(prisma, {
