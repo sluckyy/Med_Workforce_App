@@ -131,6 +131,7 @@ export default function Passport() {
                   {c.issuer && <span>Issuer: {c.issuer} · </span>}
                   Expires: {formatDate(c.expiryDate)} · {c.evidenceCount} evidence version
                   {c.evidenceCount === 1 ? "" : "s"}
+                  {c.registrationType && ` · ${c.registrationType.replaceAll("_", " ").toLowerCase()} registration`}
                 </div>
                 <div style={{ fontSize: 12, color: "#777" }}>
                   {c.latestVerification
@@ -163,7 +164,76 @@ export default function Passport() {
         )}
       </ul>
       <DeclareEndorsementForm onDeclared={reload} />
+
+      <WorkforceAccessSection />
     </section>
+  );
+}
+
+interface AreaOfNeedRow {
+  id: string;
+  facility: string | null;
+  classification: string;
+  status: string;
+}
+
+interface MoratoriumRow {
+  id: string;
+  facility: string | null;
+  restricted: boolean;
+  dwsAreaCode: string | null;
+}
+
+function WorkforceAccessSection() {
+  const [areaOfNeed, setAreaOfNeed] = useState<AreaOfNeedRow[]>([]);
+  const [moratorium, setMoratorium] = useState<MoratoriumRow[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    Promise.all([
+      apiFetch<AreaOfNeedRow[]>("/v1/practitioners/me/area-of-need"),
+      apiFetch<MoratoriumRow[]>("/v1/practitioners/me/moratorium-status"),
+    ])
+      .then(([aon, mor]) => {
+        setAreaOfNeed(aon);
+        setMoratorium(mor);
+      })
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Could not load Workforce Access data."));
+  }, []);
+
+  if (areaOfNeed.length === 0 && moratorium.length === 0 && !error) return null;
+
+  return (
+    <div style={{ marginTop: 32 }}>
+      <h3>Workforce Access</h3>
+      {error && <p style={{ color: "#a33" }}>{error}</p>}
+      {areaOfNeed.length > 0 && (
+        <>
+          <p style={{ fontSize: 13, fontWeight: 600, margin: "8px 0 4px" }}>Area of Need determinations</p>
+          <ul style={{ fontSize: 13 }}>
+            {areaOfNeed.map((a) => (
+              <li key={a.id}>
+                {a.classification} {a.facility && `· ${a.facility}`} · {a.status}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {moratorium.length > 0 && (
+        <>
+          <p style={{ fontSize: 13, fontWeight: 600, margin: "8px 0 4px" }}>Moratorium / DWS status</p>
+          <ul style={{ fontSize: 13 }}>
+            {moratorium.map((m) => (
+              <li key={m.id}>
+                {m.restricted ? "Restricted" : "Cleared"}
+                {m.facility && ` · exception at ${m.facility}`}
+                {m.dwsAreaCode && ` · DWS area ${m.dwsAreaCode}`}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -179,6 +249,7 @@ function DeclareCredentialForm({
   const [referenceNumber, setReferenceNumber] = useState("");
   const [issueDate, setIssueDate] = useState("");
   const [expiryDate, setExpiryDate] = useState("");
+  const [registrationType, setRegistrationType] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -199,6 +270,7 @@ function DeclareCredentialForm({
           referenceNumber: referenceNumber || undefined,
           issueDate: issueDate || undefined,
           expiryDate: expiryDate || undefined,
+          registrationType: registrationType || undefined,
         }),
       });
       setDefinitionCode("");
@@ -206,6 +278,7 @@ function DeclareCredentialForm({
       setReferenceNumber("");
       setIssueDate("");
       setExpiryDate("");
+      setRegistrationType("");
       await onDeclared();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not add that credential.");
@@ -253,6 +326,16 @@ function DeclareCredentialForm({
               <input type="date" value={expiryDate} onChange={(e) => setExpiryDate(e.target.value)} style={{ display: "block", padding: 6, width: "100%" }} />
             </label>
           </div>
+          <label style={{ fontSize: 12 }}>
+            Registration type (if applicable — e.g. for provisional/limited Ahpra registration)
+            <select value={registrationType} onChange={(e) => setRegistrationType(e.target.value)} style={{ display: "block", padding: 6, width: "100%" }}>
+              <option value="">Not applicable</option>
+              <option value="GENERAL">General</option>
+              <option value="PROVISIONAL">Provisional</option>
+              <option value="LIMITED">Limited</option>
+              <option value="SUPERVISED_PRACTICE">Supervised practice</option>
+            </select>
+          </label>
           {error && <p style={{ color: "#a33", fontSize: 13, margin: 0 }}>{error}</p>}
           <button type="submit" disabled={submitting} style={{ padding: 8, alignSelf: "flex-start" }}>
             {submitting ? "Adding…" : "Add credential"}
