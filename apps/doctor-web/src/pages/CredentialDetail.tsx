@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { apiFetch, ApiError } from "../lib/api.js";
+
+const ACCEPTED_EVIDENCE_TYPES = "application/pdf,image/png,image/jpeg";
 
 interface CredentialDetailData {
   id: string;
@@ -128,20 +130,15 @@ export default function CredentialDetail() {
 
       <h3 style={{ marginTop: 24 }}>Evidence versions</h3>
       {data.evidence.length === 0 ? (
-        <p style={{ color: "#666", fontSize: 13 }}>
-          No evidence attached yet. Evidence upload isn't available in this build — no object storage
-          is provisioned yet (see README "Status").
-        </p>
+        <p style={{ color: "#666", fontSize: 13 }}>No evidence attached yet.</p>
       ) : (
         <ul>
           {data.evidence.map((e) => (
-            <li key={e.id} style={{ fontSize: 13 }}>
-              v{e.version} · {e.sourceType} · {e.originalFilename ?? "(no file)"} · {e.scanStatus}
-              {e.supersededAt && " · superseded"}
-            </li>
+            <EvidenceRow key={e.id} credentialId={data.id} evidence={e} credentialStatus={data.status} onChanged={reload} />
           ))}
         </ul>
       )}
+      <EvidenceUploadForm credentialId={data.id} onUploaded={reload} />
 
       <h3 style={{ marginTop: 24 }}>Verification history</h3>
       {data.verifications.length === 0 ? (
@@ -219,6 +216,120 @@ function EditForm({ data, onSaved }: { data: CredentialDetailData; onSaved: () =
       <button type="submit" disabled={submitting} style={{ padding: 8, alignSelf: "flex-start" }}>
         {submitting ? "Saving…" : "Save changes"}
       </button>
+    </form>
+  );
+}
+
+function EvidenceRow({
+  credentialId,
+  evidence,
+  credentialStatus,
+  onChanged,
+}: {
+  credentialId: string;
+  evidence: CredentialDetailData["evidence"][number];
+  credentialStatus: string;
+  onChanged: () => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function onDownload() {
+    setError(null);
+    setBusy(true);
+    try {
+      const { url } = await apiFetch<{ url: string }>(
+        `/v1/passport/credentials/${credentialId}/evidence/${evidence.id}/download`,
+      );
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not get a download link.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onRemove() {
+    setError(null);
+    setBusy(true);
+    try {
+      await apiFetch(`/v1/passport/credentials/${credentialId}/evidence/${evidence.id}`, { method: "DELETE" });
+      await onChanged();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not remove this evidence.");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <li style={{ fontSize: 13, marginBottom: 4 }}>
+      v{evidence.version} · {evidence.sourceType} · {evidence.originalFilename ?? "(no file)"} · {evidence.scanStatus}
+      {evidence.supersededAt && " · superseded"}
+      {" · "}
+      <button
+        type="button"
+        disabled={busy}
+        onClick={onDownload}
+        style={{ background: "none", border: "none", textDecoration: "underline", cursor: "pointer", padding: 0, fontSize: 13 }}
+      >
+        Download
+      </button>
+      {credentialStatus === "DECLARED" && (
+        <>
+          {" · "}
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onRemove}
+            style={{ background: "none", border: "none", textDecoration: "underline", cursor: "pointer", padding: 0, fontSize: 13, color: "#a33" }}
+          >
+            Remove
+          </button>
+        </>
+      )}
+      {error && <span style={{ color: "#a33", marginLeft: 8 }}>{error}</span>}
+    </li>
+  );
+}
+
+function EvidenceUploadForm({ credentialId, onUploaded }: { credentialId: string; onUploaded: () => Promise<void> }) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function onSubmit(event: FormEvent) {
+    event.preventDefault();
+    const file = fileInputRef.current?.files?.[0];
+    if (!file) return;
+    setError(null);
+    setSubmitting(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      await apiFetch(`/v1/passport/credentials/${credentialId}/evidence`, {
+        method: "POST",
+        body: formData,
+      });
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      await onUploaded();
+    } catch (err) {
+      setError(
+        err instanceof ApiError
+          ? err.message
+          : "Could not upload this file. Only PDF, PNG and JPEG are accepted, up to 15MB.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form onSubmit={onSubmit} style={{ marginTop: 12, display: "flex", gap: 8, alignItems: "center" }}>
+      <input ref={fileInputRef} type="file" accept={ACCEPTED_EVIDENCE_TYPES} required />
+      <button type="submit" disabled={submitting} style={{ padding: 8 }}>
+        {submitting ? "Uploading…" : "Upload evidence"}
+      </button>
+      {error && <span style={{ color: "#a33", fontSize: 13 }}>{error}</span>}
     </form>
   );
 }

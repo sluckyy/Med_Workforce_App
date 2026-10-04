@@ -42,8 +42,10 @@ async function rawFetch(path: string, options: RequestInit, accessToken: string 
   // (FST_ERR_CTP_EMPTY_JSON_BODY), which broke every body-less action
   // (approve, publish, suspend, withdraw, ...) until caught by browser
   // testing rather than just curl (curl/requests don't set this header
-  // unless a body is actually given).
-  if (options.body) headers.set("Content-Type", "application/json");
+  // unless a body is actually given). A FormData body (evidence upload) is
+  // the other exception — the browser must set its own multipart boundary,
+  // so this must not stomp on that either.
+  if (options.body && !(options.body instanceof FormData)) headers.set("Content-Type", "application/json");
   if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
   return fetch(`${getApiBaseUrl()}${path}`, { ...options, headers });
 }

@@ -6,4 +6,6 @@ export const env = {
     .split(",")
     .map((origin) => origin.trim())
     .filter(Boolean),
+  azureStorageConnectionString: process.env.AZURE_STORAGE_CONNECTION_STRING ?? "",
+  evidenceContainerName: process.env.EVIDENCE_CONTAINER_NAME ?? "evidence",
 };

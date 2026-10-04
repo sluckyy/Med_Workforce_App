@@ -8,10 +8,10 @@
 //
 // This is a pilot/co-design deployment, not a production one — see
 // docs/addendum/v0.3-addendum.md §6 (adaptive, risk-triggered governance).
-// No object storage is provisioned yet because credential evidence upload
-// is not implemented in the scaffold; add a storage account + Container
-// Apps Azure Files mount here when that module lands (see
-// docs/spec/01-technical-architecture-data-model-v0.2.docx §32).
+// A Storage Account + private blob container hold credential evidence
+// uploads (docs/spec/01-technical-architecture-data-model-v0.2.docx §32);
+// the API reaches it via a connection string secret and generates
+// short-lived SAS URLs for download rather than proxying file bytes.
 //
 // Deploy with (the two secure params are never stored on disk — see
 // infra/azure/main.bicepparam for why they are deliberately left unset there):
@@ -64,6 +64,12 @@ var uniq = uniqueString(resourceGroup().id, suffix)
 var acrName = toLower(replace('${suffix}acr${uniq}', '-', ''))
 var postgresServerName = '${suffix}-pg-${uniq}'
 var databaseName = 'med_workforce'
+// Storage account names are globally unique, 3-24 chars, lowercase
+// alphanumeric only (no hyphens) — stricter than ACR's naming rules, so
+// the un-truncated '${suffix}sa${uniq}' (25 chars with the default
+// namePrefix) doesn't fit and has to be clipped.
+var storageAccountName = toLower(substring(replace('${suffix}sa${uniq}', '-', ''), 0, 24))
+var evidenceContainerName = 'evidence'
 var usePlaceholderImages = apiImage == 'mcr.microsoft.com/k8se/quickstart:latest'
 
 // ---------------------------------------------------------------------------
@@ -101,6 +107,38 @@ resource acr 'Microsoft.ContainerRegistry/registries@2023-11-01-preview' = {
   sku: { name: 'Basic' }
   properties: {
     adminUserEnabled: true
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Blob storage for credential evidence uploads
+// ---------------------------------------------------------------------------
+resource storageAccount 'Microsoft.Storage/storageAccounts@2023-01-01' = {
+  name: storageAccountName
+  location: location
+  sku: { name: 'Standard_LRS' }
+  kind: 'StorageV2'
+  properties: {
+    minimumTlsVersion: 'TLS1_2'
+    allowBlobPublicAccess: false
+    supportsHttpsTrafficOnly: true
+  }
+}
+
+resource blobService 'Microsoft.Storage/storageAccounts/blobServices@2023-01-01' = {
+  parent: storageAccount
+  name: 'default'
+}
+
+// No public access — the API is the only reader/writer. Downloads go
+// through a short-lived SAS URL the API generates per request (see
+// services/api/src/modules/passport/storage.ts) rather than a public or
+// container-level anonymous read policy.
+resource evidenceContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-01-01' = {
+  parent: blobService
+  name: evidenceContainerName
+  properties: {
+    publicAccess: 'None'
   }
 }
 
@@ -157,6 +195,7 @@ resource postgresFirewallAzure 'Microsoft.DBforPostgreSQL/flexibleServers/firewa
 // Shared configuration
 // ---------------------------------------------------------------------------
 var databaseUrl = 'postgresql://${postgresAdminLogin}:${uriComponent(postgresAdminPassword)}@${postgres.properties.fullyQualifiedDomainName}:5432/${databaseName}?sslmode=require'
+var storageConnectionString = 'DefaultEndpointsProtocol=https;AccountName=${storageAccount.name};AccountKey=${storageAccount.listKeys().keys[0].value};EndpointSuffix=core.windows.net'
 
 var apiFqdn = '${suffix}-api.${containerEnv.properties.defaultDomain}'
 var doctorWebFqdn = '${suffix}-doctor.${containerEnv.properties.defaultDomain}'
@@ -169,12 +208,15 @@ var apiSecrets = [
   { name: 'database-url', value: databaseUrl }
   { name: 'jwt-secret-key', value: jwtSecretKey }
   { name: 'acr-password', value: acr.listCredentials().passwords[0].value }
+  { name: 'storage-connection-string', value: storageConnectionString }
 ]
 
 var apiEnv = [
   { name: 'DATABASE_URL', secretRef: 'database-url' }
   { name: 'JWT_SECRET_KEY', secretRef: 'jwt-secret-key' }
   { name: 'CORS_ALLOWED_ORIGINS', value: '${doctorWebUrl},${hospitalWebUrl}' }
+  { name: 'AZURE_STORAGE_CONNECTION_STRING', secretRef: 'storage-connection-string' }
+  { name: 'EVIDENCE_CONTAINER_NAME', value: evidenceContainerName }
 ]
 
 var registries = usePlaceholderImages ? [] : [
@@ -340,3 +382,5 @@ output apiUrl string = 'https://${apiApp.properties.configuration.ingress.fqdn}'
 output doctorWebUrl string = 'https://${doctorWebApp.properties.configuration.ingress.fqdn}'
 output hospitalWebUrl string = 'https://${hospitalWebApp.properties.configuration.ingress.fqdn}'
 output postgresServer string = postgres.properties.fullyQualifiedDomainName
+output storageAccountName string = storageAccount.name
+output evidenceContainerName string = evidenceContainerName

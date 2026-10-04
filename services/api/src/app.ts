@@ -1,5 +1,6 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import multipart from "@fastify/multipart";
 import { env } from "./config/env.js";
 import { prisma } from "./prisma.js";
 import { registerIdentityModule } from "./modules/identity/index.js";
@@ -15,6 +16,7 @@ export function buildApp() {
   app.register(cors, {
     origin: env.corsAllowedOrigins.length > 0 ? env.corsAllowedOrigins : true,
   });
+  app.register(multipart);
 
   registerIdentityModule(app);
   registerPassportModule(app);
