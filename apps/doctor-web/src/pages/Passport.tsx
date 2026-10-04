@@ -166,6 +166,7 @@ export default function Passport() {
       <DeclareEndorsementForm onDeclared={reload} />
 
       <WorkforceAccessSection />
+      <FatigueSection />
     </section>
   );
 }
@@ -234,6 +235,159 @@ function WorkforceAccessSection() {
         </>
       )}
     </div>
+  );
+}
+
+interface WorkEpisodeRow {
+  id: string;
+  startAt: string;
+  endAt: string;
+  source: string;
+  assuranceLevel: string | null;
+}
+
+interface FatigueDeclarationRow {
+  id: string;
+  declaredAt: string;
+  statement: string;
+}
+
+function FatigueSection() {
+  const [episodes, setEpisodes] = useState<WorkEpisodeRow[]>([]);
+  const [declarations, setDeclarations] = useState<FatigueDeclarationRow[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  const reload = useCallback(async () => {
+    try {
+      const [eps, decls] = await Promise.all([
+        apiFetch<WorkEpisodeRow[]>("/v1/practitioners/me/work-episodes"),
+        apiFetch<FatigueDeclarationRow[]>("/v1/practitioners/me/fatigue-declarations"),
+      ]);
+      setEpisodes(eps);
+      setDeclarations(decls);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not load fatigue data.");
+    }
+  }, []);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  return (
+    <div style={{ marginTop: 32 }}>
+      <h3>Work episodes &amp; fatigue</h3>
+      <p style={{ fontSize: 12, color: "#666" }}>
+        A confirmed platform booking appears here automatically. Declaring an external engagement here lets a
+        fatigue check flag the overlap as unconfirmed rather than missing it entirely — the platform cannot verify a
+        self-declared episode, so it can only ever be treated as unknown, never a silent pass or fail.
+      </p>
+      {error && <p style={{ color: "#a33" }}>{error}</p>}
+
+      <ul style={{ listStyle: "none", padding: 0, fontSize: 13 }}>
+        {episodes.map((e) => (
+          <li key={e.id} style={{ borderBottom: "1px solid #eee", padding: "6px 0" }}>
+            {formatDate(e.startAt)} – {formatDate(e.endAt)} · <strong>{e.source.replaceAll("_", " ")}</strong>
+            {e.assuranceLevel && ` (${e.assuranceLevel})`}
+          </li>
+        ))}
+        {episodes.length === 0 && <p style={{ color: "#666" }}>No work episodes yet.</p>}
+      </ul>
+      <DeclareWorkEpisodeForm onDeclared={reload} />
+
+      <h4 style={{ marginTop: 20, fontSize: 14 }}>Fatigue declarations</h4>
+      <ul style={{ listStyle: "none", padding: 0, fontSize: 13 }}>
+        {declarations.map((d) => (
+          <li key={d.id} style={{ borderBottom: "1px solid #eee", padding: "6px 0" }}>
+            {formatDate(d.declaredAt)} · {d.statement}
+          </li>
+        ))}
+        {declarations.length === 0 && <p style={{ color: "#666" }}>None yet.</p>}
+      </ul>
+      <DeclareFatigueForm onDeclared={reload} />
+    </div>
+  );
+}
+
+function DeclareWorkEpisodeForm({ onDeclared }: { onDeclared: () => Promise<void> }) {
+  const [startAt, setStartAt] = useState("");
+  const [endAt, setEndAt] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function onSubmit(event: FormEvent) {
+    event.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      await apiFetch("/v1/practitioners/me/work-episodes", {
+        method: "POST",
+        body: JSON.stringify({ startAt, endAt }),
+      });
+      setStartAt("");
+      setEndAt("");
+      await onDeclared();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not declare that work episode.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form onSubmit={onSubmit} style={{ border: "1px dashed #bbb", borderRadius: 6, padding: 12, display: "flex", flexDirection: "column", gap: 8, maxWidth: 420, marginTop: 8 }}>
+      <strong style={{ fontSize: 14 }}>Declare an external work episode</strong>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <label style={{ fontSize: 12, flex: 1 }}>
+          Start
+          <input type="datetime-local" value={startAt} onChange={(e) => setStartAt(e.target.value)} required style={{ display: "block", padding: 6, width: "100%" }} />
+        </label>
+        <label style={{ fontSize: 12, flex: 1 }}>
+          End
+          <input type="datetime-local" value={endAt} onChange={(e) => setEndAt(e.target.value)} required style={{ display: "block", padding: 6, width: "100%" }} />
+        </label>
+      </div>
+      {error && <p style={{ color: "#a33", fontSize: 13, margin: 0 }}>{error}</p>}
+      <button type="submit" disabled={submitting} style={{ padding: 8, alignSelf: "flex-start" }}>
+        {submitting ? "Declaring…" : "Declare episode"}
+      </button>
+    </form>
+  );
+}
+
+function DeclareFatigueForm({ onDeclared }: { onDeclared: () => Promise<void> }) {
+  const [statement, setStatement] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function onSubmit(event: FormEvent) {
+    event.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      await apiFetch("/v1/practitioners/me/fatigue-declarations", {
+        method: "POST",
+        body: JSON.stringify({ statement }),
+      });
+      setStatement("");
+      await onDeclared();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not submit that declaration.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form onSubmit={onSubmit} style={{ border: "1px dashed #bbb", borderRadius: 6, padding: 12, display: "flex", flexDirection: "column", gap: 8, maxWidth: 420, marginTop: 8 }}>
+      <strong style={{ fontSize: 14 }}>Submit a fatigue declaration</strong>
+      <textarea placeholder="e.g. I feel fit to work this shift." value={statement} onChange={(e) => setStatement(e.target.value)} required rows={2} style={{ padding: 6 }} />
+      {error && <p style={{ color: "#a33", fontSize: 13, margin: 0 }}>{error}</p>}
+      <button type="submit" disabled={submitting} style={{ padding: 8, alignSelf: "flex-start" }}>
+        {submitting ? "Submitting…" : "Submit declaration"}
+      </button>
+    </form>
   );
 }
 

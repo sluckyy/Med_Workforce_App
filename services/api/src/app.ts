@@ -13,6 +13,7 @@ import { registerCommercialModule } from "./modules/commercial/index.js";
 import { registerTimesheetModule } from "./modules/timesheet/index.js";
 import { registerSharingModule } from "./modules/sharing/index.js";
 import { registerWorkforceAccessModule } from "./modules/workforceAccess/index.js";
+import { registerFatigueModule } from "./modules/fatigue/index.js";
 
 export function buildApp() {
   const app = Fastify({ logger: true });
@@ -32,6 +33,7 @@ export function buildApp() {
   registerTimesheetModule(app);
   registerSharingModule(app);
   registerWorkforceAccessModule(app);
+  registerFatigueModule(app);
 
   app.get("/health", async () => ({ status: "ok" }));
 

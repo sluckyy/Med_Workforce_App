@@ -21,8 +21,8 @@
  * modules/exchange's own assess endpoint, using this same
  * evaluateRequirementSet function so the two can never silently diverge.
  * Real evaluators exist for ACTIVE_SCOPE, REGISTRATION, CREDENTIAL/
- * TRAINING, AVAILABILITY, AREA_OF_NEED and MORATORIUM_LOCATION (see
- * evaluators.ts — VISA_WORK_RIGHTS reuses the CREDENTIAL evaluator
+ * TRAINING, AVAILABILITY, AREA_OF_NEED, MORATORIUM_LOCATION and FATIGUE
+ * (see evaluators.ts — VISA_WORK_RIGHTS reuses the CREDENTIAL evaluator
  * against the IMMIGRATION_WORK_RIGHTS_VISA definition rather than needing
  * its own); every other RequirementType resolves UNKNOWN via the same "no
  * implementation -> never an optimistic PASS" fallback, not a silent

@@ -34,6 +34,7 @@ const EVALUATOR_OPTIONS = [
   { value: "credentialCurrent", type: "VISA_WORK_RIGHTS", label: "Visa work rights current", paramKey: "definitionCode", paramLabel: "Credential code", paramDefault: "IMMIGRATION_WORK_RIGHTS_VISA" },
   { value: "areaOfNeedCurrent", type: "AREA_OF_NEED", label: "Area of Need determination at facility", paramKey: "facilityId", paramLabel: "Facility" },
   { value: "moratoriumLocationClear", type: "MORATORIUM_LOCATION", label: "Not blocked by moratorium/DWS status at facility", paramKey: "facilityId", paramLabel: "Facility" },
+  { value: "fatigueCheck", type: "FATIGUE", label: "No overlapping work episode (fatigue rule code)", paramKey: "ruleCode", paramLabel: "Published fatigue rule code" },
 ];
 
 export default function VacancyEditor() {
