@@ -357,6 +357,7 @@ resource hospitalWebApp 'Microsoft.App/containerApps@2024-03-01' = {
           image: hospitalWebImage
           env: [
             { name: 'API_BASE_URL', value: apiUrl }
+            { name: 'DOCTOR_WEB_URL', value: doctorWebUrl }
           ]
           resources: {
             cpu: json('0.25')

@@ -989,6 +989,10 @@ model TimesheetVersion {
   createdBy      String?
   createdAt      DateTime  @default(now())
 
+  // One row per version number per timesheet — lets a version be looked
+  // up/updated by (timesheetId, version) directly (e.g. editing version 1
+  // in place while still DRAFT) instead of always going through `id`.
+  @@unique([timesheetId, version])
   @@index([timesheetId])
 }
 
@@ -1001,6 +1005,12 @@ model ApprovalToken {
   expiresAt       DateTime
   status          TokenStatus @default(ACTIVE)
   challengeStatus String?
+  // The decision made through this single-use token — kept on the token
+  // itself (not the Timesheet) since a Timesheet can cycle through
+  // several tokens (amend/reject -> resubmit -> a fresh token) and each
+  // token's own decision should stay attributable to it.
+  decisionReason  String?
+  decidedAt       DateTime?
 
   @@index([timesheetId])
 }
