@@ -166,6 +166,22 @@ export function registerTimesheetRoutes(app: FastifyInstance) {
     reply.send(serializeTimesheet(timesheet));
   });
 
+  // Every timesheet across the practitioner's own bookings — the doctor
+  // Home page's "pending timesheet" section needs the whole picture in
+  // one call rather than one request per booking.
+  app.get("/v1/timesheets/me", { preHandler: app.authenticate }, async (request, reply) => {
+    if (!request.authUser?.practitionerId) {
+      reply.code(403).send({ error: "Forbidden" });
+      return;
+    }
+    const timesheets = await prisma.timesheet.findMany({
+      where: { booking: { practitionerId: request.authUser.practitionerId } },
+      include: TIMESHEET_INCLUDE,
+      orderBy: { booking: { vacancy: { startAt: "desc" } } },
+    });
+    reply.send(timesheets.map(serializeTimesheet));
+  });
+
   function requireOwnDraftLike(
     timesheet: TimesheetWithIncludes,
     practitionerId: string,

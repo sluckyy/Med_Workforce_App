@@ -109,6 +109,7 @@ export function registerExperienceRoutes(app: FastifyInstance) {
     reply.send(
       responses.map((r) => ({
         id: r.id,
+        bookingEpisodeId: r.bookingEpisodeId,
         submittedAt: r.submittedAt,
         scores: r.scoresJson,
         freeText: r.freeText,
