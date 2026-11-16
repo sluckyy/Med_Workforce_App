@@ -196,6 +196,71 @@ export function registerExchangeRoutes(app: FastifyInstance) {
     reply.send(vacancies.map(serializeVacancy));
   });
 
+  // A dry-run of the same evaluateRequirementSet the staff assess endpoint
+  // persists, so a doctor sees the same per-requirement explanation staff
+  // would — but nothing is written: an EligibilityAssessment is a staff
+  // decision record, not a browse side-effect. No published requirement
+  // set is INDETERMINATE, never a default pass.
+  async function selfAssess(vacancy: { startAt: Date; endAt: Date; roleTemplate: { defaultRequirementSetId: string | null } }, practitionerId: string) {
+    if (!vacancy.roleTemplate.defaultRequirementSetId) {
+      return { status: "INDETERMINATE" as const, results: [], explanation: "This role has no published requirement set yet, so eligibility can't be assessed." };
+    }
+    const requirementSet = await prisma.requirementSet.findUniqueOrThrow({
+      where: { id: vacancy.roleTemplate.defaultRequirementSetId },
+      include: { requirements: { orderBy: { sortOrder: "asc" } } },
+    });
+    const { status, results } = await evaluateRequirementSet(prisma, requirementSet, practitionerId, {
+      window: { startAt: vacancy.startAt, endAt: vacancy.endAt },
+    });
+    return { status, results, explanation: null };
+  }
+
+  // Practitioner-facing: every open vacancy with this doctor's own
+  // eligibility against it — the honest version of "suitable vacancies".
+  app.get("/v1/practitioners/me/vacancies", { preHandler: app.authenticate }, async (request, reply) => {
+    if (!request.authUser?.practitionerId) {
+      reply.code(403).send({ error: "Forbidden" });
+      return;
+    }
+    const practitionerId = request.authUser.practitionerId;
+    const vacancies = await prisma.vacancy.findMany({
+      where: { status: VacancyStatus.SOURCING },
+      include: VACANCY_INCLUDE,
+      orderBy: { startAt: "asc" },
+    });
+    const assessed = await Promise.all(
+      vacancies.map(async (v) => ({ ...serializeVacancy(v), eligibility: { status: (await selfAssess(v, practitionerId)).status } })),
+    );
+    reply.send(assessed);
+  });
+
+  app.get("/v1/vacancies/:id", { preHandler: app.authenticate }, async (request, reply) => {
+    if (!request.authUser?.practitionerId) {
+      reply.code(403).send({ error: "Forbidden" });
+      return;
+    }
+    const { id } = request.params as { id: string };
+    const vacancy = await prisma.vacancy.findUnique({ where: { id }, include: VACANCY_INCLUDE });
+    // Only open vacancies are a doctor's business; anything else 404s
+    // rather than confirming it exists.
+    if (!vacancy || vacancy.status !== VacancyStatus.SOURCING) {
+      reply.code(404).send({ error: "Not found" });
+      return;
+    }
+    const practitionerId = request.authUser.practitionerId;
+    const [candidate, eligibility] = await Promise.all([
+      prisma.candidate.findUnique({ where: { vacancyId_practitionerId: { vacancyId: id, practitionerId } } }),
+      selfAssess(vacancy, practitionerId),
+    ]);
+    reply.send({
+      ...serializeVacancy(vacancy),
+      rateContext: vacancy.rateContextJson,
+      travelAccommodation: vacancy.travelAccommodationJson,
+      candidateStatus: candidate?.status ?? null,
+      eligibility,
+    });
+  });
+
   app.post("/v1/vacancies/:id/apply", { preHandler: app.authenticate }, async (request, reply) => {
     if (!request.authUser?.practitionerId) {
       reply.code(403).send({ error: "Forbidden" });
