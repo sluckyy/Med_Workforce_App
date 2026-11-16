@@ -612,6 +612,8 @@ enum PreferenceDimension {
   TRAVEL
   ACCOMMODATION
   AGENCY_RELATIONSHIP
+  DELIVERY_MODE // v0.3 addendum §4 — in-person / telehealth / hybrid preference
+  NOTIFICATION // channels and quiet hours
 }
 
 model Availability {

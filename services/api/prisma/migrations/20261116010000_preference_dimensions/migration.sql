@@ -1,0 +1,2 @@
+ALTER TYPE "PreferenceDimension" ADD VALUE 'DELIVERY_MODE';
+ALTER TYPE "PreferenceDimension" ADD VALUE 'NOTIFICATION';

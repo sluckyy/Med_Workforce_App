@@ -6,6 +6,7 @@ import Passport from "./pages/Passport.js";
 import CredentialDetail from "./pages/CredentialDetail.js";
 import ShareBuilder from "./pages/ShareBuilder.js";
 import Preferences from "./pages/Preferences.js";
+import VacancyList from "./pages/VacancyList.js";
 import VacancyDetail from "./pages/VacancyDetail.js";
 import Booking from "./pages/Booking.js";
 import Timesheet from "./pages/Timesheet.js";
@@ -19,7 +20,7 @@ const nav = [
   { to: "/passport", label: "Passport" },
   { to: "/share", label: "Share builder" },
   { to: "/preferences", label: "Preferences" },
-  { to: "/vacancy", label: "Vacancy detail" },
+  { to: "/vacancy", label: "Vacancies" },
   { to: "/booking", label: "Booking" },
   { to: "/timesheet", label: "Timesheet" },
   { to: "/experience", label: "Experience" },
@@ -95,7 +96,8 @@ function Shell() {
             <Route path="/passport/credential/:id" element={<CredentialDetail />} />
             <Route path="/share" element={<ShareBuilder />} />
             <Route path="/preferences" element={<Preferences />} />
-            <Route path="/vacancy" element={<VacancyDetail />} />
+            <Route path="/vacancy" element={<VacancyList />} />
+            <Route path="/vacancy/:id" element={<VacancyDetail />} />
             <Route path="/booking" element={<Booking />} />
             <Route path="/timesheet" element={<Timesheet />} />
             <Route path="/experience" element={<Experience />} />
