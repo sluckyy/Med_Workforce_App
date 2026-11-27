@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "../../prisma.js";
 import { recordAuditEvent } from "../audit/index.js";
+import { fatigueRuleParametersSchema } from "./rules.js";
 
 // FatigueRule authorship is modelled like a RequirementSet: draft, then
 // published. It has no organisationId (it is cross-organisation safety
@@ -14,7 +15,9 @@ const READ_ROLES = ["MEDICAL_WORKFORCE", "CREDENTIAL_OFFICER", "SCOPE_APPROVER"]
 
 const createRuleBody = z.object({
   code: z.string().min(1),
-  parametersJson: z.record(z.unknown()),
+  // Strict schema (see rules.ts): a mistyped key is a 400 here, never a
+  // stored rule that silently checks nothing.
+  parametersJson: fatigueRuleParametersSchema,
   effectiveFrom: z.coerce.date().optional(),
   effectiveTo: z.coerce.date().optional(),
 });

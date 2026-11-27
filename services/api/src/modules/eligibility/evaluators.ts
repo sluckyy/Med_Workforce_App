@@ -10,6 +10,7 @@
  * default to ELIGIBLE.
  */
 import type { Prisma, PrismaClient, Requirement, RequirementSet } from "@prisma/client";
+import { describeRule, evaluateFatigueRules, fatigueRuleParametersSchema } from "../fatigue/rules.js";
 
 export interface EvaluatorContext {
   prisma: PrismaClient;
@@ -243,15 +244,14 @@ const moratoriumLocationClear: Evaluator = async (requirement, ctx) => {
 // "MVP scope: hard gate only on what the platform can know for certain
 // (its own double-bookings for one practitioner). Anything relying on
 // self-declaration produces INDETERMINATE... never silently blocked and
-// never silently passed." A PLATFORM_BOOKING WorkEpisode (created when a
-// booking is confirmed — see modules/exchange) that overlaps the window
-// is a fact this platform itself is authoritative about, so it's a hard
-// FAIL; a SELF_DECLARED episode (lower assurance by definition) can only
-// ever push the result to UNKNOWN, never to a confident FAIL or PASS on
-// its own. FatigueRule.parametersJson's rolling-hours/inter-shift-break
-// thresholds are stored and versioned but not yet interpreted here — only
-// direct time-window overlap is checked, a documented simplification
-// (see modules/fatigue/index.ts), not a silent one.
+// never silently passed." The rule's limits (minimum inter-shift break,
+// maximum consecutive hours, maximum rolling 7/14-day hours — see
+// modules/fatigue/rules.ts) are applied in two passes: first against
+// PLATFORM_BOOKING episodes only, facts this platform is itself
+// authoritative about, where any breach is a hard FAIL; then with
+// SELF_DECLARED episodes added, where a breach can only push the result to
+// UNKNOWN — lower-assurance data never produces a confident FAIL or PASS.
+// A rule whose stored parameters no longer parse is UNKNOWN, not a pass.
 const fatigueCheck: Evaluator = async (requirement, ctx) => {
   if (!ctx.window) {
     return { status: "UNKNOWN", explanation: "No date window supplied to evaluate fatigue exposure against" };
@@ -264,33 +264,43 @@ const fatigueCheck: Evaluator = async (requirement, ctx) => {
   if (!rule || rule.status !== "PUBLISHED") {
     return { status: "UNKNOWN", explanation: `No published fatigue rule "${ruleCode}"` };
   }
+  const params = fatigueRuleParametersSchema.safeParse(rule.parametersJson ?? {});
+  if (!params.success) {
+    return { status: "UNKNOWN", explanation: `Fatigue rule "${ruleCode}" has unreadable parameters — cannot apply it` };
+  }
 
+  // Wide enough for the longest rolling window the schema allows, so no
+  // episode that could count is left out.
+  const lookback = 28 * 24 * 3_600_000;
   const episodes = await ctx.prisma.workEpisode.findMany({
     where: {
       practitionerId: ctx.practitionerId,
-      startAt: { lt: ctx.window.endAt },
-      endAt: { gt: ctx.window.startAt },
+      startAt: { lt: new Date(ctx.window.endAt.getTime() + lookback) },
+      endAt: { gt: new Date(ctx.window.startAt.getTime() - lookback) },
     },
   });
+  const platform = episodes.filter((e) => e.source === "PLATFORM_BOOKING");
+  const selfDeclared = episodes.filter((e) => e.source === "SELF_DECLARED");
 
-  const platformConflict = episodes.find((e) => e.source === "PLATFORM_BOOKING");
-  if (platformConflict) {
-    return {
-      status: "FAIL",
-      explanation:
-        requirement.failureMessage ?? "Practitioner already has a confirmed platform booking that overlaps this window",
-    };
+  const hardBreaches = evaluateFatigueRules(ctx.window, platform, params.data);
+  if (hardBreaches.length > 0) {
+    return { status: "FAIL", explanation: requirement.failureMessage ?? `Against booked shifts: ${hardBreaches.join("; ")}` };
   }
-  const selfDeclaredConflict = episodes.find((e) => e.source === "SELF_DECLARED");
-  if (selfDeclaredConflict) {
-    return {
-      status: "UNKNOWN",
-      explanation:
-        requirement.unknownMessage ??
-        "A self-declared external engagement overlaps this window — lower assurance, cannot confirm no conflict",
-    };
+  if (selfDeclared.length > 0) {
+    const softBreaches = evaluateFatigueRules(ctx.window, [...platform, ...selfDeclared], params.data);
+    if (softBreaches.length > 0) {
+      return {
+        status: "UNKNOWN",
+        explanation:
+          requirement.unknownMessage ??
+          `A self-declared external engagement would breach the rule (${softBreaches.join("; ")}) — lower assurance, confirm with the practitioner`,
+      };
+    }
   }
-  return { status: "PASS", explanation: "No known overlapping work episode for this window" };
+  return {
+    status: "PASS",
+    explanation: `Within rule "${ruleCode}" (${describeRule(params.data)}) across ${platform.length} booked and ${selfDeclared.length} self-declared episode(s)`,
+  };
 };
 
 export const EVALUATORS: Record<string, Evaluator> = {
