@@ -13,7 +13,9 @@
  * endorsements (ownership checked, never another practitioner's), with a
  * mandatory expiry and an optional OTP gate (a 6-digit code shown to the
  * doctor exactly once, bcrypt-hashed at rest — the doctor relays it to the
- * recipient themselves, since no notification service exists). The
+ * recipient themselves; the link is emailed via modules/notifications when
+ * a recipient address was given, but the OTP deliberately never is, so the
+ * two factors never travel in the same channel). The
  * recipient link (GET /v1/shares/view/:token) is itself high-entropy and
  * hashed at rest; every open/view/download/failed attempt is recorded as
  * a ShareAccessEvent, and the doctor can read that trail back
@@ -26,8 +28,8 @@
  * ones): a generated, watermarked PDF pack (the recipient view returns
  * structured JSON only, which is the "structured manifest" half of the
  * spec's "human-readable PDF pack plus structured manifest" requirement,
- * not the PDF half); a real notification channel to deliver the link/OTP
- * (the doctor copies and sends both themselves); and snapshotting the
+ * not the PDF half); any notification channel other than email, and any
+ * delivery of the OTP (by design — the doctor relays it); and snapshotting the
  * bundle's contents immutably at creation time — the recipient always
  * sees the practitioner's *current* record for each included item, not a
  * frozen point-in-time copy. Immigration/visa evidence (RESTRICTED

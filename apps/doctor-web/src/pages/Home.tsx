@@ -37,7 +37,11 @@ interface OpenVacancy {
   facility: { name: string };
   roleTemplate: { name: string };
   organisation: { name: string };
+  eligibility: { status: string };
+  match: { excluded: boolean; preferred: boolean };
 }
+
+const ELIGIBILITY_COLOR: Record<string, string> = { ELIGIBLE: "#0a7a2f", INELIGIBLE: "#a33", INDETERMINATE: "#a67c00" };
 
 interface Timesheet {
   id: string;
@@ -92,7 +96,7 @@ export default function Home() {
       apiFetch<{ credentials: Credential[] }>("/v1/passport/me"),
       apiFetch<Share[]>("/v1/shares/me"),
       apiFetch<Booking[]>("/v1/bookings/me"),
-      apiFetch<OpenVacancy[]>("/v1/vacancies/open"),
+      apiFetch<OpenVacancy[]>("/v1/practitioners/me/vacancies"),
       apiFetch<Timesheet[]>("/v1/timesheets/me"),
       apiFetch<ExperienceResponse[]>("/v1/practitioners/me/experience-responses"),
     ])
@@ -139,6 +143,9 @@ export default function Home() {
   const pendingTimesheets = workedPast
     .map((b) => ({ booking: b, timesheet: timesheetByBooking.get(b.id) ?? null }))
     .filter(({ timesheet }) => !timesheet || timesheet.status in TIMESHEET_NEEDS_DOCTOR);
+  const suitable = data.vacancies
+    .filter((v) => !v.match.excluded)
+    .sort((a, b) => Number(b.match.preferred) - Number(a.match.preferred) || a.startAt.localeCompare(b.startAt));
   const respondedBookings = new Set(data.responses.map((r) => r.bookingEpisodeId).filter(Boolean));
   const feedbackDue = workedPast.filter((b) => !respondedBookings.has(b.id));
 
@@ -209,24 +216,27 @@ export default function Home() {
           )}
         </Panel>
 
-        <Panel title="Open vacancies" to="/vacancy" linkLabel="Browse vacancies">
+        <Panel title="Suitable vacancies" to="/vacancy" linkLabel="Browse all vacancies">
           <p style={{ margin: "0 0 6px", fontSize: 12, color: "#666" }}>
-            Everything currently open, not filtered to you — your eligibility is assessed when you apply, and
-            an unknown is shown as unknown, never as a quiet yes.
+            Open vacancies you haven't excluded, each checked against your passport for that shift. An unknown is
+            shown as INDETERMINATE, never as a quiet yes.
           </p>
-          {data.vacancies.length === 0 ? (
-            <Empty>No open vacancies right now.</Empty>
+          {suitable.length === 0 ? (
+            <Empty>{data.vacancies.length === 0 ? "No open vacancies right now." : "Everything open is hidden by your preferences."}</Empty>
           ) : (
             <ul style={listStyle}>
-              {data.vacancies.slice(0, 5).map((v) => (
+              {suitable.slice(0, 5).map((v) => (
                 <li key={v.id} style={rowStyle}>
-                  <span>
+                  <Link to={`/vacancy/${v.id}`}>
                     {formatDate(v.startAt)} · {v.facility.name} · {v.roleTemplate.name}
+                  </Link>
+                  <span style={{ fontWeight: 600, fontSize: 12 }}>
+                    {v.match.preferred && <span style={{ color: "#0a7a2f", marginRight: 8 }}>Preferred</span>}
+                    <span style={{ color: ELIGIBILITY_COLOR[v.eligibility.status] ?? "#333" }}>{v.eligibility.status}</span>
                   </span>
-                  <span style={{ color: "#666" }}>{v.organisation.name}</span>
                 </li>
               ))}
-              {data.vacancies.length > 5 && <li style={{ color: "#666" }}>and {data.vacancies.length - 5} more</li>}
+              {suitable.length > 5 && <li style={{ color: "#666" }}>and {suitable.length - 5} more</li>}
             </ul>
           )}
         </Panel>

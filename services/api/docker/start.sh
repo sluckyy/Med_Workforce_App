@@ -14,4 +14,12 @@ clamd --config-file=/etc/clamav/clamd.conf &
 freshclam --config-file=/etc/clamav/freshclam.conf --daemon &
 
 npx prisma migrate deploy --schema prisma/schema.prisma
+
+# Opt-in demo data (see src/seed/demo.ts). Idempotent, so safe on every
+# start of a demo environment; a seed failure is logged but must not stop
+# the API from coming up.
+if [ "$DEMO_SEED" = "true" ]; then
+  node dist/seed/run-demo.js || echo "demo seed failed (continuing)" >&2
+fi
+
 exec node dist/server.js

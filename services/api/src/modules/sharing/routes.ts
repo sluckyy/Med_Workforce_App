@@ -3,6 +3,8 @@ import { z } from "zod";
 import { ShareStatus, ShareAccessEventType } from "@prisma/client";
 import { prisma } from "../../prisma.js";
 import { recordAuditEvent } from "../audit/index.js";
+import { env } from "../../config/env.js";
+import { notifyInBackground } from "../notifications/index.js";
 import { hashPassword, verifyPassword } from "../identity/password.js";
 import { generateShareToken, hashShareToken, generateOtpCode } from "./tokens.js";
 
@@ -148,6 +150,20 @@ export function registerSharingRoutes(app: FastifyInstance) {
       outcome: "success",
       metadata: { itemCount: items.length, otpRequired },
     });
+
+    // The link goes to the recipient by email when they gave one; the OTP
+    // deliberately does not — both factors in one channel would make the
+    // OTP pointless, so the doctor relays the code separately, as before.
+    if (env.doctorWebUrl) {
+      notifyInBackground(prisma, {
+        to: share.recipientContact,
+        subject: "Credentials have been shared with you",
+        body: `A practitioner has shared credentials with you via the Medical Workforce Passport.\n\nView them here (link expires ${share.expiresAt.toLocaleString("en-AU")}):\n${env.doctorWebUrl}/shares/${token}\n${otpRequired ? "\nYou will also need the access code the practitioner gives you directly." : ""}`,
+        resourceType: "CredentialShare",
+        resourceId: share.id,
+        actorId: request.authUser.id,
+      });
+    }
 
     // The raw token (and OTP code, if any) are returned exactly once —
     // same one-time-reveal pattern as MFA backup codes and the timesheet

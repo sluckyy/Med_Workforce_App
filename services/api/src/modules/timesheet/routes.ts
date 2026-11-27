@@ -3,6 +3,8 @@ import { z } from "zod";
 import { Prisma, BookingStatus, VacancyStatus, TimesheetStatus, TokenStatus } from "@prisma/client";
 import { prisma } from "../../prisma.js";
 import { recordAuditEvent } from "../audit/index.js";
+import { env } from "../../config/env.js";
+import { notifyInBackground } from "../notifications/index.js";
 import { generateApprovalToken, hashApprovalToken } from "./tokens.js";
 
 const WORKFORCE_ROLE = "MEDICAL_WORKFORCE" as const;
@@ -453,10 +455,22 @@ export function registerTimesheetRoutes(app: FastifyInstance) {
         metadata: { recipient },
       });
 
-      // The raw token is returned exactly once — like an MFA backup code —
-      // and never persisted in plaintext. No notification service exists
-      // yet (documented gap, see modules/timesheet/index.ts), so staff
-      // must copy and send this link to the approver themselves.
+      if (env.doctorWebUrl) {
+        notifyInBackground(prisma, {
+          to: recipient,
+          subject: "A timesheet is waiting for your approval",
+          body: `A locum timesheet has been sent to you for approval via the Medical Workforce Exchange.\n\nReview and decide here (link expires ${expiresAt.toLocaleString("en-AU")}):\n${env.doctorWebUrl}/approve/${token}`,
+          resourceType: "Timesheet",
+          resourceId: id,
+          actorId: request.authUser!.id,
+        });
+      }
+
+      // The raw token is still returned exactly once — like an MFA backup
+      // code — and never persisted in plaintext. The email above is a
+      // convenience, not load-bearing: if it was skipped or failed (see the
+      // notification.email.* audit events) staff can still copy this link
+      // to the approver themselves.
       reply.code(201).send({ token, expiresAt });
     },
   );

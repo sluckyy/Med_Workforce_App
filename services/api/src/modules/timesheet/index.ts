@@ -12,9 +12,11 @@
  * TIMESHEET_PENDING). Staff (MEDICAL_WORKFORCE) send it for approval,
  * which issues a random, hashed-at-rest, single-use ApprovalToken — the
  * raw token is returned exactly once, the same one-time-reveal pattern as
- * MFA backup codes, since no email/SMS service exists to deliver it (a
- * documented gap, not a silent one: §37's notification service is P0 but
- * out of scope here). The external approver named by that token — who
+ * MFA backup codes — and, when the recipient is an email address, also
+ * emailed to them via modules/notifications (§37's notification service).
+ * The email is a convenience rather than load-bearing: if it was skipped
+ * or failed (see the notification.email.* audit events) staff still have
+ * the one-time link to send themselves. The external approver named by that token — who
  * never has a platform account at all, matching §24's "Timesheet
  * Approver: only token-scoped timesheet" and §33's "single-purpose token"
  * row — can APPROVE (Booking -> CLOSED, Vacancy -> COMPLETE), AMEND
@@ -30,8 +32,7 @@
  * Deliberately not built in this slice (documented gaps, not silent
  * ones): OTP/step-up assurance on the approval link itself (§33 lists it
  * as "plus OTP/risk-based assurance"), rate-limiting token guesses, and
- * any notification delivery — staff must copy the one-time link and send
- * it to the approver themselves.
+ * any notification channel other than email (no SMS).
  */
 import type { FastifyInstance } from "fastify";
 import { registerTimesheetRoutes } from "./routes.js";

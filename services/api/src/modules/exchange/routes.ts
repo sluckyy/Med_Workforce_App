@@ -3,6 +3,8 @@ import { z } from "zod";
 import { Prisma, CandidateStatus, VacancyStatus, BookingStatus, CandidateSourceType, AgencyProposalStatus } from "@prisma/client";
 import { prisma } from "../../prisma.js";
 import { recordAuditEvent } from "../audit/index.js";
+import { env } from "../../config/env.js";
+import { notifyInBackground } from "../notifications/index.js";
 import { evaluateRequirementSet } from "../eligibility/evaluators.js";
 import { findActiveAgreement } from "../commercial/agreements.js";
 
@@ -215,21 +217,58 @@ export function registerExchangeRoutes(app: FastifyInstance) {
     return { status, results, explanation: null };
   }
 
+  // Preference matching is advisory and separate from eligibility: it can
+  // mark a vacancy excluded (a SITE/ROLE the doctor said no to) or preferred
+  // (delivery mode matches), but never changes the eligibility verdict —
+  // a doctor can still open and apply to anything. SITE/ROLE targets are
+  // free text (see modules/preferences), so matching is a case-insensitive
+  // name-or-code comparison, not a referential join. REGION, RATE, TRAVEL and
+  // ACCOMMODATION have nothing on a Vacancy to compare against yet.
+  function matchPreferences(
+    v: { deliveryMode: string; facility: { code: string; name: string }; roleTemplate: { code: string; name: string } },
+    preferences: Array<{ dimension: string; valueJson: Prisma.JsonValue }>,
+  ) {
+    const reasons: string[] = [];
+    let excluded = false;
+    let preferred = false;
+    const norm = (s: unknown) => String(s ?? "").trim().toLowerCase();
+    const names = (x: { code: string; name: string }) => new Set([norm(x.code), norm(x.name)]);
+    for (const p of preferences) {
+      const val = (p.valueJson ?? {}) as Record<string, unknown>;
+      if (p.dimension === "SITE" && names(v.facility).has(norm(val.name))) {
+        if (val.exclude) { excluded = true; reasons.push(`You excluded site ${v.facility.name}`); } else { preferred = true; reasons.push(`Preferred site`); }
+      }
+      if (p.dimension === "ROLE" && names(v.roleTemplate).has(norm(val.name))) {
+        if (val.exclude) { excluded = true; reasons.push(`You excluded role ${v.roleTemplate.name}`); } else { preferred = true; reasons.push(`Preferred role`); }
+      }
+      if (p.dimension === "DELIVERY_MODE" && val.mode) {
+        if (norm(val.mode) === norm(v.deliveryMode)) { preferred = true; reasons.push("Matches your delivery-mode preference"); } else { reasons.push(`Not your preferred delivery mode (${v.deliveryMode.replaceAll("_", " ").toLowerCase()})`); }
+      }
+    }
+    return { excluded, preferred: preferred && !excluded, reasons };
+  }
+
   // Practitioner-facing: every open vacancy with this doctor's own
-  // eligibility against it — the honest version of "suitable vacancies".
+  // eligibility against it, plus how it sits against their preferences —
+  // together, the honest version of "suitable vacancies".
   app.get("/v1/practitioners/me/vacancies", { preHandler: app.authenticate }, async (request, reply) => {
     if (!request.authUser?.practitionerId) {
       reply.code(403).send({ error: "Forbidden" });
       return;
     }
     const practitionerId = request.authUser.practitionerId;
-    const vacancies = await prisma.vacancy.findMany({
-      where: { status: VacancyStatus.SOURCING },
-      include: VACANCY_INCLUDE,
-      orderBy: { startAt: "asc" },
-    });
+    const [vacancies, preferences] = await Promise.all([
+      prisma.vacancy.findMany({ where: { status: VacancyStatus.SOURCING }, include: VACANCY_INCLUDE, orderBy: { startAt: "asc" } }),
+      prisma.practitionerPreference.findMany({
+        where: { practitionerId, OR: [{ effectiveTo: null }, { effectiveTo: { gt: new Date() } }] },
+      }),
+    ]);
     const assessed = await Promise.all(
-      vacancies.map(async (v) => ({ ...serializeVacancy(v), eligibility: { status: (await selfAssess(v, practitionerId)).status } })),
+      vacancies.map(async (v) => ({
+        ...serializeVacancy(v),
+        eligibility: { status: (await selfAssess(v, practitionerId)).status },
+        match: matchPreferences(v, preferences),
+      })),
     );
     reply.send(assessed);
   });
@@ -508,6 +547,25 @@ export function registerExchangeRoutes(app: FastifyInstance) {
           },
         });
       });
+
+      // The doctor has to confirm this booking; tell them it exists. Their
+      // NOTIFICATION preference is honoured (practitionerId set).
+      if (env.doctorWebUrl) {
+        const [practitioner, roleTemplate] = await Promise.all([
+          prisma.practitioner.findUnique({ where: { id: candidate.practitionerId } }),
+          prisma.roleTemplate.findUnique({ where: { id: vacancy.roleTemplateId } }),
+        ]);
+        const roleName = roleTemplate?.name ?? "a shift";
+        notifyInBackground(prisma, {
+          to: practitioner?.email,
+          practitionerId: candidate.practitionerId,
+          subject: `Booking to confirm: ${roleName}`,
+          body: `You have been selected for a shift and need to confirm it.\n\nRole: ${roleName}\nWhen: ${vacancy.startAt.toLocaleString("en-AU")} – ${vacancy.endAt.toLocaleString("en-AU")}\n\nConfirm or decline here:\n${env.doctorWebUrl}/booking`,
+          resourceType: "Booking",
+          resourceId: booking.id,
+          actorId: request.authUser!.id,
+        });
+      }
 
       await recordAuditEvent(prisma, {
         eventType: "exchange.candidate.select",
