@@ -73,7 +73,7 @@ export default function FatigueSafety() {
               <strong>{r.code}</strong>
               <span style={{ fontSize: 12, fontWeight: 600 }}>{r.status}</span>
             </div>
-            <div style={{ fontSize: 12, color: "#666" }}>{JSON.stringify(r.parametersJson)}</div>
+            <div style={{ fontSize: 12, color: "#666" }}>{describeRuleParameters(r.parametersJson)}</div>
             {r.status === "DRAFT" && (
               <button type="button" onClick={() => publish(r.id)} style={{ marginTop: 6, padding: "4px 8px" }}>
                 Publish
@@ -94,9 +94,22 @@ export default function FatigueSafety() {
   );
 }
 
+export function describeRuleParameters(p: Record<string, unknown> | null | undefined): string {
+  if (!p) return "no hour limits (overlap only)";
+  const parts: string[] = [];
+  if (typeof p.minInterShiftBreakHours === "number") parts.push(`${p.minInterShiftBreakHours}h minimum break`);
+  if (typeof p.maxConsecutiveHours === "number") parts.push(`${p.maxConsecutiveHours}h max consecutive`);
+  const r = p.maxRollingHours as { days?: number; hours?: number } | undefined;
+  if (r && typeof r.hours === "number") parts.push(`${r.hours}h per ${r.days} days`);
+  return parts.length ? parts.join(" · ") : "no hour limits (overlap only)";
+}
+
 function FatigueRuleForm({ onCreated }: { onCreated: () => Promise<void> }) {
   const [code, setCode] = useState("");
-  const [parametersJson, setParametersJson] = useState("{}");
+  const [minBreak, setMinBreak] = useState("");
+  const [maxConsecutive, setMaxConsecutive] = useState("");
+  const [rollingHours, setRollingHours] = useState("");
+  const [rollingDays, setRollingDays] = useState("7");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -105,20 +118,15 @@ function FatigueRuleForm({ onCreated }: { onCreated: () => Promise<void> }) {
     setSubmitting(true);
     setError(null);
     try {
-      let parsed: Record<string, unknown>;
-      try {
-        parsed = JSON.parse(parametersJson);
-      } catch {
-        setError("Parameters must be valid JSON (e.g. {} or {\"maxConsecutiveHours\": 14}).");
-        setSubmitting(false);
-        return;
-      }
-      await apiFetch("/v1/fatigue-rules", {
-        method: "POST",
-        body: JSON.stringify({ code, parametersJson: parsed }),
-      });
+      const parametersJson: Record<string, unknown> = {};
+      if (minBreak) parametersJson.minInterShiftBreakHours = Number(minBreak);
+      if (maxConsecutive) parametersJson.maxConsecutiveHours = Number(maxConsecutive);
+      if (rollingHours) parametersJson.maxRollingHours = { days: Number(rollingDays), hours: Number(rollingHours) };
+      await apiFetch("/v1/fatigue-rules", { method: "POST", body: JSON.stringify({ code, parametersJson }) });
       setCode("");
-      setParametersJson("{}");
+      setMinBreak("");
+      setMaxConsecutive("");
+      setRollingHours("");
       await onCreated();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not create this rule.");
@@ -131,11 +139,21 @@ function FatigueRuleForm({ onCreated }: { onCreated: () => Promise<void> }) {
     <form onSubmit={onSubmit} style={{ border: "1px dashed #bbb", borderRadius: 6, padding: 12, display: "flex", flexDirection: "column", gap: 8, maxWidth: 420 }}>
       <strong style={{ fontSize: 14 }}>Create a fatigue rule</strong>
       <p style={{ fontSize: 12, color: "#666", margin: 0 }}>
-        Created as DRAFT. Must be published before a requirement referencing its code resolves anything other than
-        UNKNOWN. Parameters are stored but not yet interpreted — only direct window overlap is checked.
+        Created as DRAFT; publish it before a requirement referencing its code resolves anything other than UNKNOWN.
+        Leave a limit blank to not apply it. A breach against booked shifts fails eligibility; a breach that only
+        appears once a doctor's self-declared work is counted is INDETERMINATE, never a silent pass or fail.
       </p>
       <input placeholder="Code (e.g. STANDARD_FATIGUE_RULE)" value={code} onChange={(e) => setCode(e.target.value)} required style={{ padding: 6 }} />
-      <textarea placeholder="Parameters JSON" value={parametersJson} onChange={(e) => setParametersJson(e.target.value)} rows={3} style={{ padding: 6, fontFamily: "monospace" }} />
+      <input type="number" min={0.5} step={0.5} placeholder="Minimum break between shifts (hours)" value={minBreak} onChange={(e) => setMinBreak(e.target.value)} style={{ padding: 6 }} />
+      <input type="number" min={1} step={0.5} placeholder="Maximum consecutive hours" value={maxConsecutive} onChange={(e) => setMaxConsecutive(e.target.value)} style={{ padding: 6 }} />
+      <div style={{ display: "flex", gap: 8 }}>
+        <input type="number" min={1} step={0.5} placeholder="Maximum rolling hours" value={rollingHours} onChange={(e) => setRollingHours(e.target.value)} style={{ padding: 6, flex: 1 }} />
+        <select value={rollingDays} onChange={(e) => setRollingDays(e.target.value)} style={{ padding: 6 }} aria-label="Rolling window days">
+          <option value="7">per 7 days</option>
+          <option value="14">per 14 days</option>
+          <option value="28">per 28 days</option>
+        </select>
+      </div>
       {error && <p style={{ color: "#a33", fontSize: 13, margin: 0 }}>{error}</p>}
       <button type="submit" disabled={submitting} style={{ padding: 8, alignSelf: "flex-start" }}>
         {submitting ? "Creating…" : "Create rule"}

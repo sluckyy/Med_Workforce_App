@@ -38,8 +38,15 @@ interface CredentialDetailData {
     verifierOrgId: string | null;
     notes: string | null;
   }>;
-  dependentRoleReadiness: unknown;
+  dependentRoleReadiness: Array<{
+    roleTemplate: { id: string; code: string; name: string; ownerOrg: string };
+    requirement: { code: string; type: string; hard: boolean };
+    status: string;
+    explanation: string;
+  }>;
 }
+
+const READINESS_COLOR: Record<string, string> = { PASS: "#0a7a2f", FAIL: "#a33", UNKNOWN: "#a67c00" };
 
 function formatDate(value: string | null) {
   return value ? new Date(value).toLocaleDateString() : "—";
@@ -156,9 +163,23 @@ export default function CredentialDetail() {
       )}
 
       <h3 style={{ marginTop: 24 }}>Dependent role readiness</h3>
-      <p style={{ color: "#666", fontSize: 13 }}>
-        Not available yet — this is computed by the eligibility engine, which hasn't been built.
+      <p style={{ color: "#666", fontSize: 12 }}>
+        Published roles whose requirements name this credential, and whether it currently satisfies each — the
+        same evaluator an organisation runs, so UNKNOWN here (usually "not yet verified") is what they would see.
       </p>
+      {data.dependentRoleReadiness.length === 0 ? (
+        <p style={{ color: "#666", fontSize: 13 }}>No published role requires this credential yet.</p>
+      ) : (
+        <ul style={{ listStyle: "none", padding: 0, fontSize: 13 }}>
+          {data.dependentRoleReadiness.map((r) => (
+            <li key={`${r.roleTemplate.id}-${r.requirement.code}`} style={{ padding: "5px 0", borderBottom: "1px solid #eee" }}>
+              <strong style={{ color: READINESS_COLOR[r.status] ?? "#333" }}>{r.status}</strong> · {r.roleTemplate.name}{" "}
+              <span style={{ color: "#888" }}>({r.roleTemplate.ownerOrg}{r.requirement.hard ? "" : ", soft requirement"})</span>
+              <div style={{ color: "#555" }}>{r.explanation}</div>
+            </li>
+          ))}
+        </ul>
+      )}
     </section>
   );
 }

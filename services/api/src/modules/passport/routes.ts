@@ -3,6 +3,7 @@ import { z } from "zod";
 import { Prisma, CredentialStatus } from "@prisma/client";
 import { prisma } from "../../prisma.js";
 import { recordAuditEvent } from "../audit/index.js";
+import { runEvaluator } from "../eligibility/evaluators.js";
 
 // Every route below this point is the practitioner acting on their own
 // record — viewing another practitioner's full passport belongs to
@@ -337,10 +338,33 @@ export function registerPassportRoutes(app: FastifyInstance) {
           verifierOrgId: v.verifierOrgId,
           notes: v.notes,
         })),
-        // "Dependent role readiness" (spec §9) is an eligibility-engine
-        // output, not passport data — left null until modules/eligibility
-        // exists rather than faked here.
-        dependentRoleReadiness: null,
+        // "Dependent role readiness" (spec §9): every published role whose
+        // requirements name this credential's definition, with the verdict
+        // the real evaluator gives for it right now — the same answer an
+        // organisation assessing the doctor would see, not a passport-side
+        // approximation of it.
+        dependentRoleReadiness: await Promise.all(
+          (
+            await prisma.requirement.findMany({
+              where: {
+                requirementSet: { status: "PUBLISHED" },
+                type: { in: ["REGISTRATION", "CREDENTIAL", "TRAINING"] },
+                parametersJson: { path: ["definitionCode"], equals: credential.definition.code },
+              },
+              include: { requirementSet: { include: { roleTemplate: { include: { ownerOrg: true } } } } },
+              orderBy: { requirementSet: { roleTemplate: { name: "asc" } } },
+            })
+          ).map(async (req) => {
+            const result = await runEvaluator(req, { prisma, practitionerId: credential.practitionerId, asOf: new Date() });
+            const rt = req.requirementSet.roleTemplate;
+            return {
+              roleTemplate: { id: rt.id, code: rt.code, name: rt.name, ownerOrg: rt.ownerOrg.name },
+              requirement: { code: req.code, type: req.type, hard: req.hard },
+              status: result.status,
+              explanation: result.explanation,
+            };
+          }),
+        ),
       });
     },
   );

@@ -16,16 +16,19 @@ import { registerFatigueRoutes } from "./routes.js";
  * rule authoring.
  *
  * MVP scope and documented gaps:
- * - Only a confirmed platform booking is a hard FAIL on overlap; a
- *   self-declared external engagement is UNKNOWN, never a silent PASS or
- *   FAIL, because the platform cannot verify it. It becomes a genuine
- *   cross-organisation hard gate only once a shared WorkEpisode event feed
- *   exists across participating LHNs.
- * - FatigueRule.parametersJson is stored but not yet interpreted for
- *   rolling-hours or inter-shift-break arithmetic — only direct time-window
- *   overlap is checked against existing episodes. A rule must exist and be
- *   PUBLISHED for the evaluator to resolve anything beyond UNKNOWN; the
- *   parameters themselves are not yet read by the evaluator.
+ * - A FatigueRule's parametersJson (rules.ts: minimum inter-shift break,
+ *   maximum consecutive hours, maximum rolling 7/14/28-day hours; strict
+ *   schema, so a mistyped key is rejected rather than stored and ignored)
+ *   is applied in two passes. Against confirmed platform bookings — facts
+ *   this platform is authoritative about — any breach is a hard FAIL.
+ *   With the doctor's self-declared episodes added, a breach is UNKNOWN,
+ *   never a silent PASS or FAIL, because the platform cannot verify them.
+ *   It becomes a genuine cross-organisation hard gate only once a shared
+ *   WorkEpisode event feed exists across participating LHNs.
+ * - A rule must exist and be PUBLISHED for the evaluator to resolve
+ *   anything beyond UNKNOWN; a rule with no limits set checks overlap only.
+ *   Availability.recurrenceJson and WorkEpisode PARTNER_FEED are not
+ *   consumed (no partner feed exists yet).
  * - FatigueAssessment (a dedicated history table for fatigue-specific
  *   checks) is modelled in the schema but not written to by this module —
  *   the standard eligibility pipeline persists its own EligibilityAssessment
