@@ -8,4 +8,12 @@ export const env = {
     .filter(Boolean),
   azureStorageConnectionString: process.env.AZURE_STORAGE_CONNECTION_STRING ?? "",
   evidenceContainerName: process.env.EVIDENCE_CONTAINER_NAME ?? "evidence",
+  // Public URL of the doctor-facing app, used to build links in outbound
+  // notifications (share links, approval links). Empty disables link-bearing
+  // notifications rather than emitting a broken relative URL.
+  doctorWebUrl: (process.env.DOCTOR_WEB_URL ?? "").replace(/\/+$/, ""),
+  // Azure Communication Services Email. Unset means "no provider": sends are
+  // skipped and recorded as such (modules/notifications), never faked.
+  acsConnectionString: process.env.ACS_CONNECTION_STRING ?? "",
+  emailSender: process.env.EMAIL_SENDER ?? "",
 };

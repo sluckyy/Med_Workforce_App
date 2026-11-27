@@ -204,11 +204,39 @@ var apiUrl = 'https://${apiFqdn}'
 var doctorWebUrl = 'https://${doctorWebFqdn}'
 var hospitalWebUrl = 'https://${hospitalWebFqdn}'
 
+// ---------------------------------------------------------------------------
+// Email (Azure Communication Services). An Azure-managed sender domain means
+// no DNS work; the trade-off is a DoNotReply@<guid>.azurecomm.net sender,
+// which is fine for a pilot and swappable for a custom domain later.
+// ---------------------------------------------------------------------------
+resource emailService 'Microsoft.Communication/emailServices@2023-04-01' = {
+  name: '${suffix}-email'
+  location: 'global'
+  properties: { dataLocation: 'Australia' }
+}
+
+resource emailDomain 'Microsoft.Communication/emailServices/domains@2023-04-01' = {
+  parent: emailService
+  name: 'AzureManagedDomain'
+  location: 'global'
+  properties: { domainManagement: 'AzureManaged' }
+}
+
+resource communicationService 'Microsoft.Communication/communicationServices@2023-04-01' = {
+  name: '${suffix}-acs'
+  location: 'global'
+  properties: {
+    dataLocation: 'Australia'
+    linkedDomains: [emailDomain.id]
+  }
+}
+
 var apiSecrets = [
   { name: 'database-url', value: databaseUrl }
   { name: 'jwt-secret-key', value: jwtSecretKey }
   { name: 'acr-password', value: acr.listCredentials().passwords[0].value }
   { name: 'storage-connection-string', value: storageConnectionString }
+  { name: 'acs-connection-string', value: communicationService.listKeys().primaryConnectionString }
 ]
 
 var apiEnv = [
@@ -217,6 +245,9 @@ var apiEnv = [
   { name: 'CORS_ALLOWED_ORIGINS', value: '${doctorWebUrl},${hospitalWebUrl}' }
   { name: 'AZURE_STORAGE_CONNECTION_STRING', secretRef: 'storage-connection-string' }
   { name: 'EVIDENCE_CONTAINER_NAME', value: evidenceContainerName }
+  { name: 'DOCTOR_WEB_URL', value: doctorWebUrl }
+  { name: 'ACS_CONNECTION_STRING', secretRef: 'acs-connection-string' }
+  { name: 'EMAIL_SENDER', value: 'DoNotReply@${emailDomain.properties.mailFromSenderDomain}' }
 ]
 
 var registries = usePlaceholderImages ? [] : [
